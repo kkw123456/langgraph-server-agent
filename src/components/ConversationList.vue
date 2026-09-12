@@ -18,6 +18,9 @@ defineEmits<{ select: [id: string]; delete: [id: string] }>()
     >
       <MessageSquare :size="15" class="conv-ico" />
       <span class="conv-title">{{ c.title }}</span>
+      <span v-if="c.running" class="conv-running" title="正在回复">
+        <span class="run-dot"></span>运行中
+      </span>
       <NPopconfirm @positive-click="$emit('delete', c.id)">
         <template #trigger>
           <NButton class="conv-del" quaternary circle size="tiny" @click.stop>

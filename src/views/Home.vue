@@ -15,6 +15,7 @@ import {
   sendText, createSkill, setMode, filteredConvs,
 } from '../store'
 import type { CreateSkillPayload } from '../types'
+import { toolLabel } from '../utils/toolLabels'
 import { useBreakpoint } from '../composables/useBreakpoint'
 import ConversationList from '../components/ConversationList.vue'
 import ChatWindow from '../components/ChatWindow.vue'
@@ -184,6 +185,12 @@ function onKeydown(e: KeyboardEvent): void {
 
 onMounted(async () => {
   await Promise.all([loadConvs(), loadSkills()])
+  // 刷新后恢复到最后一次使用的会话（若它仍在列表中），
+  // 这样运行中的会话刷新后能立即通过 resume 回放继续围观流式输出
+  const last = localStorage.getItem('lg_last_conv')
+  if (!state.current && last && state.convs.some((c) => c.id === last)) {
+    await selectConv(last)
+  }
   window.addEventListener('keydown', onKeydown)
 })
 onBeforeUnmount(() => {
@@ -328,16 +335,16 @@ onBeforeUnmount(() => {
             @update:value="(v: string) => (tab = v as typeof tab)"
           >
             <NTabPane name="artifacts">
-              <template #tab><span class="tab-label"><Sparkles :size="14" /> 产物</span></template>
+              <template #tab><span class="tab-label"><Sparkles :size="14" /> <span class="tab-text">产物</span></span></template>
             </NTabPane>
             <NTabPane name="files">
-              <template #tab><span class="tab-label"><FolderClosed :size="14" /> 所有文件</span></template>
+              <template #tab><span class="tab-label"><FolderClosed :size="14" /> <span class="tab-text">所有文件</span></span></template>
             </NTabPane>
             <NTabPane name="diff">
-              <template #tab><span class="tab-label"><GitCompare :size="14" /> 变更预览</span></template>
+              <template #tab><span class="tab-label"><GitCompare :size="14" /> <span class="tab-text">变更预览</span></span></template>
             </NTabPane>
             <NTabPane name="preview">
-              <template #tab><span class="tab-label"><FileText :size="14" /> 文件预览</span></template>
+              <template #tab><span class="tab-label"><FileText :size="14" /> <span class="tab-text">文件预览</span></span></template>
             </NTabPane>
           </NTabs>
           <div class="rp-actions">
@@ -372,8 +379,8 @@ onBeforeUnmount(() => {
             >
               <span class="ac-ico"><Sparkles :size="15" /></span>
               <span class="ac-body">
-                <div class="ac-name">{{ a.name }}</div>
-                <div class="ac-meta muted">{{ a.kind }}</div>
+                <div class="ac-name">{{ toolLabel(a.name) }}</div>
+                <div class="ac-meta muted">{{ a.name }}</div>
               </span>
             </div>
             <NEmpty v-if="!artifacts.length" class="page-empty" description="本轮还没有产生结果" />

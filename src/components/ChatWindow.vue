@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { ref, watch, nextTick, computed } from 'vue'
-import { NInput, NButton, NSelect, NIcon } from 'naive-ui'
+import { NInput, NButton, NSelect, NIcon, NAvatar } from 'naive-ui'
 import {
   Send, Sparkles, Loader2, Plus, Paperclip, Globe, ListChecks, Code2, FileText,
-  Table2, Search, Bug, Wand2, Palette, Image, Braces,
+  Table2, Search, Bug, Wand2, Palette, Image, Braces, Square, Bot,
 } from 'lucide-vue-next'
-import { state } from '../store'
+import { state, stopChat } from '../store'
 import { wb, setModel } from '../workbench'
 import MessageBubble from './MessageBubble.vue'
 
@@ -15,8 +15,10 @@ const box = ref<HTMLElement | null>(null)
 const inputRef = ref<InstanceType<typeof NInput> | null>(null)
 const scene = ref('日常办公')
 
+// 会话进行中（等待回复 / 流式输出 / 工具执行）：发送键切换为停止键
+const busy = computed(() => state.waiting || state.running || !!state.live)
 const streaming = computed(() => !!state.live)
-const empty = computed(() => !state.messages.length && !state.live)
+const empty = computed(() => !state.messages.length && !state.live && !state.waiting)
 
 // 场景化快捷入口：点一下等于「新建会话 + 发送该指令」
 const SCENES: Record<string, { icon: unknown; title: string; desc: string; prompt: string }[]> = {
@@ -48,6 +50,7 @@ const modelOptions = computed(() =>
 )
 
 function submit(): void {
+  if (busy.value) return // 进行中禁止重复发送
   const t = draft.value
   if (!t.trim()) return
   emit('send', t)
@@ -75,9 +78,9 @@ async function onModel(v: string): Promise<void> {
   if (v && v !== wb.runtime.model) await setModel(v)
 }
 
-// 历史消息或流式消息变化均自动滚动到底部
+// 历史消息或流式消息变化均自动滚动到底部（含思考链与等待状态）
 watch(
-  () => [state.messages.length, state.live?.content, state.live?.tool_calls?.length],
+  () => [state.messages.length, state.live?.content, state.live?.tool_calls?.length, state.live?.reasoning, state.waiting],
   async () => { await nextTick(); scrollBottom() },
 )
 watch(() => state.current, () => { draft.value = '' })
@@ -124,6 +127,16 @@ watch(() => state.current, () => { draft.value = '' })
 
       <template v-else>
         <MessageBubble v-for="(m, i) in state.messages" :key="'h' + i" :msg="m" />
+        <!-- 等待模型回复的 loading 气泡（避免发送后聊天区毫无反馈） -->
+        <div v-if="state.waiting && !state.live" class="msg assistant">
+          <NAvatar class="avatar assistant" round :size="30" color="#e8f0fe">
+            <Bot :size="16" color="#2f6feb" />
+          </NAvatar>
+          <div class="bubble waiting-bubble">
+            <span class="dots" aria-label="加载中"><i></i><i></i><i></i></span>
+            <span class="muted tiny">正在思考…</span>
+          </div>
+        </div>
         <MessageBubble v-if="state.live" :msg="state.live" streaming />
       </template>
     </section>
@@ -161,7 +174,19 @@ watch(() => state.current, () => { draft.value = '' })
             placeholder="模型"
             @update:value="onModel"
           />
+          <!-- 进行中显示停止按钮，否则显示发送按钮 -->
           <NButton
+            v-if="busy"
+            class="send-btn stop-btn"
+            type="error"
+            circle
+            title="停止回复"
+            @click="stopChat"
+          >
+            <template #icon><Square :size="13" /></template>
+          </NButton>
+          <NButton
+            v-else
             class="send-btn"
             type="primary"
             circle
@@ -175,8 +200,8 @@ watch(() => state.current, () => { draft.value = '' })
       </div>
       <div class="composer-foot">
         <span class="muted tiny">
-          <component :is="streaming ? Loader2 : Sparkles" :size="12" />
-          {{ streaming ? '智能体正在回复…' : '智能体可能会调用工具，请留意确认提示' }}
+          <component :is="busy ? Loader2 : Sparkles" :size="12" :class="{ spin: busy }" />
+          {{ busy ? '智能体正在回复，可点击红色按钮停止…' : '智能体可能会调用工具，请留意确认提示' }}
         </span>
       </div>
     </footer>

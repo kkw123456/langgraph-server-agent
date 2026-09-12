@@ -10,13 +10,13 @@
 // 顶栏内的搜索框、模型选择器、状态文字、用户名按可用宽度逐级收起。
 import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { NButton, NSelect, NInput, NIcon, NTooltip, useMessage, useDialog } from 'naive-ui'
+import { NButton, NInput, NIcon, NTooltip, useMessage, useDialog } from 'naive-ui'
 import {
   Bot, Plus, Sparkles, Users, FolderClosed, Puzzle, Clock, MoreHorizontal,
   BookMarked, Lightbulb, Search, LogOut, User, Plug, Settings, Menu, X,
 } from 'lucide-vue-next'
 import { state, newChat } from '../store'
-import { wb, loadRuntime, setModel } from '../workbench'
+import { loadRuntime } from '../workbench'
 import { authState } from '../auth'
 import { logout as doLogout } from '../auth'
 import { useBreakpoint } from '../composables/useBreakpoint'
@@ -64,10 +64,6 @@ const activeKey = computed(() => {
 })
 
 const showRight = computed(() => route.path === '/')
-const modelOptions = computed(() =>
-  (wb.runtime.models.length ? wb.runtime.models : [wb.runtime.model]).filter(Boolean)
-    .map((m) => ({ label: m, value: m })),
-)
 
 // 侧栏/抽屉切换时禁止内容区滚动穿透（移动端常见问题）
 watch(drawer, (open) => {
@@ -89,10 +85,6 @@ async function onNav(key: string): Promise<void> {
   if (key === 'settings') { router.push('/settings'); return }
   if (key === 'more') { router.push('/settings'); return }
   router.push(`/${key}`)
-}
-
-async function onModel(v: string): Promise<void> {
-  if (v && v !== wb.runtime.model) await setModel(v)
 }
 
 function onLogout(): void {
@@ -156,15 +148,7 @@ onBeforeUnmount(() => {
         <b>LangGraph 工作台</b>
       </div>
 
-      <NSelect
-        class="tb-model"
-        size="small"
-        :value="wb.runtime.model"
-        :options="modelOptions"
-        :consistent-menu-width="false"
-        placeholder="选择模型"
-        @update:value="onModel"
-      />
+      <!-- 模型选择已收口到对话框内的模型选择器，顶栏不再重复放置 -->
 
       <NInput
         v-model:value="kw"
@@ -266,16 +250,6 @@ onBeforeUnmount(() => {
             <span>{{ n.label }}</span>
           </div>
         </div>
-        <div class="drawer-foot">
-          <NSelect
-            size="small"
-            :value="wb.runtime.model"
-            :options="modelOptions"
-            :consistent-menu-width="false"
-            placeholder="选择模型"
-            @update:value="onModel"
-          />
-        </div>
       </aside>
     </Teleport>
   </div>
@@ -322,6 +296,4 @@ onBeforeUnmount(() => {
 }
 .drawer-item:hover { background: var(--hover); }
 .drawer-item.active { background: var(--accent-weak); color: var(--accent); font-weight: 500; }
-
-.drawer-foot { padding: 10px 12px; border-top: 1px solid var(--border); }
 </style>

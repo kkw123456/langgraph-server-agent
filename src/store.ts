@@ -14,6 +14,8 @@ interface AppState {
   mode: ToolMode            // 工具调用权限模式
   pendingTool: PendingToolCall[] | null  // 待用户审批的工具调用（确认模式）
   searchKw: string          // 顶部工具栏的任务搜索关键字
+  waiting: boolean          // 消息已发出但模型尚未开始回复（显示 loading）
+  running: boolean          // 当前会话是否有正在进行的对话轮次
 }
 
 // 轻量级全局 store：单一响应式 state + 动作函数。
@@ -29,6 +31,8 @@ export const state = reactive<AppState>({
   mode: 'auto',
   pendingTool: null,
   searchKw: '',
+  waiting: false,
+  running: false,
 })
 
 let ws: WebSocket | null = null
@@ -43,7 +47,8 @@ function connectWs(id: string): void {
   ws = new WebSocket(`${proto}://${location.host}/ws/${id}`)
   ws.onopen = () => {
     state.status = '● 已连接'
-    // 重连后把当前权限模式同步给后端，确保 conn.mode 与前端一致
+    // 重连后把当前权限模式同步给后端；若该会话有运行中的任务，
+    // 后端会立即推送 resume 事件包，前端按原序重放即可续看流式输出
     ws!.send(JSON.stringify({ type: 'set_mode', mode: state.mode }))
   }
   ws.onclose = () => { state.status = '○ 已断开' }
@@ -51,15 +56,38 @@ function connectWs(id: string): void {
 }
 
 function handleEvent(msg: WsEvent): void {
+  if (msg.type === 'resume') {
+    // 断线重连回放：清空本地 live 状态后按原序重放该轮已发生的事件
+    if (msg.mode) state.mode = msg.mode
+    state.live = null
+    state.pendingTool = null
+    state.waiting = false
+    state.running = true
+    for (const ev of msg.events) applyEvent(ev)
+    return
+  }
+  applyEvent(msg)
+}
+
+function applyEvent(msg: WsEvent): void {
   switch (msg.type) {
     case 'message_start':
       state.live = { role: 'assistant', content: '', tool_calls: [] }
+      state.waiting = false
+      state.running = true
+      loadConvs() // 同步会话列表的「运行中」徽标
       break
     case 'token':
       if (state.live) state.live.content += msg.content
+      state.waiting = false
+      break
+    case 'reasoning':
+      if (state.live) state.live.reasoning = (state.live.reasoning || '') + msg.content
+      state.waiting = false
       break
     case 'tool_start':
       if (state.live) state.live.tool_calls!.push({ name: msg.name, input: msg.input, output: '执行中…' })
+      state.waiting = false
       break
     case 'tool_end':
       if (state.live && state.live.tool_calls!.length) {
@@ -69,22 +97,37 @@ function handleEvent(msg: WsEvent): void {
       break
     case 'message_end':
       if (state.live) {
-        state.messages.push({
-          role: 'assistant',
-          content: state.live.content,
-          tool_calls: (state.live.tool_calls ?? []).map((t) => ({ ...t })),
-        })
+        // 手动停止：与后端落库行为一致，在已生成内容后补停止标记
+        // （仅有工具调用而无文本时同样补，避免页面与落库不一致）
+        let c = state.live.content
+        if (msg.stopped && (c || (state.live.tool_calls ?? []).length)) {
+          c = (c || '') + (c ? '\n\n' : '') + '（已手动停止）'
+        }
+        // 内容与工具调用全为空时不落空消息（如刚等待就停止）
+        if (c || (state.live.tool_calls ?? []).length) {
+          state.messages.push({
+            role: 'assistant',
+            content: c,
+            tool_calls: (state.live.tool_calls ?? []).map((t) => ({ ...t })),
+            reasoning: state.live.reasoning,
+          })
+        }
         state.live = null
       }
+      state.waiting = false
+      state.running = false
+      if (msg.stopped) toast.info('已停止，已生成的内容已保留')
       loadConvs()
       break
     case 'error':
       if (state.live) state.live.content += '\n[错误] ' + msg.content
       else state.messages.push({ role: 'assistant', content: '[错误] ' + msg.content })
+      state.waiting = false
       break
     case 'tool_confirm':
       // 后端在「确认模式」下暂停工具执行，等待前端决策
       state.pendingTool = msg.tool_calls
+      state.waiting = false
       break
     case 'mode_set':
       state.mode = msg.mode
@@ -98,6 +141,8 @@ function handleEvent(msg: WsEvent): void {
 // ===================== 会话 =====================
 export async function loadConvs(): Promise<void> {
   state.convs = await api.get<Conversation[]>('/api/conversations')
+  const cur = state.convs.find((c) => c.id === state.current)
+  state.running = !!cur?.running
 }
 
 /** 按顶部工具栏的搜索关键字过滤后的会话列表。 */
@@ -121,6 +166,9 @@ export async function selectConv(id: string): Promise<void> {
   state.current = id
   state.live = null
   state.pendingTool = null
+  state.waiting = false
+  state.running = false
+  localStorage.setItem('lg_last_conv', id) // 刷新后恢复到最后会话
   const d = await api.get<{ meta?: Conversation; messages?: Message[] }>(`/api/conversations/${id}`)
   state.convTitle = d.meta ? d.meta.title : '未选择会话'
   state.messages = d.messages ?? []
@@ -133,8 +181,11 @@ export async function newChat(): Promise<void> {
   state.current = null
   state.live = null
   state.pendingTool = null
+  state.waiting = false
+  state.running = false
   state.messages = []
   state.convTitle = '新对话'
+  localStorage.removeItem('lg_last_conv')
   await loadConvs()
 }
 
@@ -167,18 +218,31 @@ export async function sendText(text: string): Promise<void> {
   if (!state.current) {
     const c = await api.post<Conversation>('/api/conversations', { title: t.slice(0, 30) })
     state.current = c.id
+    localStorage.setItem('lg_last_conv', c.id)
     await loadConvs()
     connectWs(c.id)
   }
   state.messages.push({ role: 'user', content: t })
   if (ws && ws.readyState === 1) {
+    state.waiting = true // 等待模型开始回复，聊天区显示 loading
+    state.running = true
     ws.send(JSON.stringify({ type: 'message', content: t }))
   } else {
     await api.post(`/api/conversations/${state.current}/messages`, { content: t })
     const d = await api.get<{ messages?: Message[] }>(`/api/conversations/${state.current}`)
     state.messages = d.messages ?? []
+    state.waiting = false
     loadConvs()
   }
+}
+
+// ===================== 停止对话 =====================
+export async function stopChat(): Promise<void> {
+  if (!state.current) return
+  state.waiting = false
+  // REST 端点为主，WS 消息兜底（双通道任一生效即可）
+  try { await api.post(`/api/conversations/${state.current}/stop`, {}) } catch (e) { /* 已结束则忽略 */ }
+  if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'stop' }))
 }
 
 // ===================== 技能 =====================

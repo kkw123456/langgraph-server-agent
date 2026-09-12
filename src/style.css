@@ -148,6 +148,9 @@ body {
   grid-template-columns: var(--sidebar-w) minmax(0, 1fr) var(--panel-w);
   height: 100%; min-height: 0; overflow: hidden;
   transition: grid-template-columns .18s ease;
+  /* 关键：覆盖层模式下的 sidebar/right 是 absolute 定位，
+     必须以 app-shell 为包含块，否则会相对视口定位盖住顶部工具栏 */
+  position: relative;
 }
 .app-shell.resizing { transition: none; cursor: col-resize; }
 /* 窄屏覆盖层模式：三列塌缩成单列，两侧变为抽屉/浮层 */
@@ -189,6 +192,17 @@ body {
 .conv.active .conv-ico { color: var(--accent); }
 .conv-ico { color: var(--muted); flex: 0 0 auto; }
 .conv-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+/* 「运行中」徽标：该会话后台仍有对话轮次在执行 */
+.conv-running {
+  display: inline-flex; align-items: center; gap: 4px; flex: 0 0 auto;
+  font-size: 11px; color: #18a058; background: rgba(24, 160, 88, .12);
+  padding: 1px 7px; border-radius: 999px; line-height: 1.6;
+}
+.run-dot {
+  width: 6px; height: 6px; border-radius: 50%; background: #18a058;
+  animation: run-pulse 1.2s ease-in-out infinite;
+}
+@keyframes run-pulse { 50% { opacity: .25; transform: scale(.8); } }
 .conv-del { opacity: 0; flex: 0 0 auto; }
 .conv:hover .conv-del { opacity: 1; }
 .conv-empty { padding: 20px 8px; }
@@ -215,16 +229,101 @@ body {
 }
 .msg { display: flex; gap: 12px; padding: 10px 28px; max-width: 900px; width: 100%; margin: 0 auto; }
 .msg.user { justify-content: flex-end; }
-.avatar { flex: 0 0 auto; margin-top: 2px; }
+.avatar { flex: 0 0 auto; margin-top: 2px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
 .msg.user .avatar { order: 2; }
 .bubble {
   padding: 11px 15px; border-radius: 14px; line-height: 1.65; font-size: 14px;
   white-space: pre-wrap; word-break: break-word; max-width: min(720px, 100%); min-width: 0;
 }
-.msg.user .bubble { background: var(--user); color: #fff; border-bottom-right-radius: 4px; order: 1; }
-.msg.assistant .bubble { background: var(--panel); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
+.msg.user .bubble {
+  background: linear-gradient(135deg, var(--accent), #4a7ff0); color: #fff;
+  border-bottom-right-radius: 4px; order: 1; box-shadow: 0 2px 8px rgba(47,111,235,.22);
+}
+.msg.assistant .bubble {
+  background: var(--panel); border: 1px solid var(--border); border-bottom-left-radius: 4px;
+  box-shadow: 0 1px 4px rgba(0,0,0,.04);
+}
 .cursor { display: inline-block; width: 7px; height: 15px; background: var(--accent); margin-left: 2px; vertical-align: text-bottom; animation: blink 1s steps(1) infinite; border-radius: 1px; }
 @keyframes blink { 50% { opacity: 0; } }
+
+/* ---- Markdown 正文排版（v-html 渲染，注意覆盖 pre-wrap） ---- */
+.md { white-space: normal; min-width: 0; }
+.md > :first-child { margin-top: 0; }
+.md > :last-child { margin-bottom: 0; }
+.md h1, .md h2, .md h3, .md h4 { margin: 14px 0 8px; line-height: 1.4; font-weight: 650; }
+.md h1 { font-size: 1.25em; } .md h2 { font-size: 1.15em; } .md h3 { font-size: 1.05em; }
+.md p { margin: 8px 0; }
+.md ul, .md ol { margin: 8px 0; padding-left: 22px; }
+.md li { margin: 3px 0; }
+.md a { color: var(--accent); text-decoration: none; }
+.md a:hover { text-decoration: underline; }
+.md blockquote {
+  margin: 8px 0; padding: 6px 12px; border-left: 3px solid var(--accent);
+  background: var(--accent-weak, rgba(47,111,235,.06)); border-radius: 0 8px 8px 0; color: var(--muted);
+}
+.md code {
+  font-family: "SF Mono", Consolas, Menlo, monospace; font-size: .88em;
+  background: rgba(120,120,128,.12); padding: 1.5px 5px; border-radius: 5px;
+}
+.md pre {
+  margin: 10px 0; padding: 12px 14px; border-radius: 10px; overflow-x: auto;
+  background: #1e2228; color: #e6e8eb; font-size: 12.5px; line-height: 1.6;
+}
+.md pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+.md table { border-collapse: collapse; margin: 10px 0; width: 100%; display: block; overflow-x: auto; font-size: 13px; }
+.md th, .md td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; white-space: nowrap; }
+.md th { background: var(--hover); font-weight: 600; }
+.md hr { border: none; border-top: 1px solid var(--border); margin: 12px 0; }
+.md img { max-width: 100%; border-radius: 8px; }
+
+/* ---- 思考过程折叠块 ---- */
+.think-collapse { margin-bottom: 8px; }
+.think-collapse .n-collapse-item { margin-top: 0 !important; }
+.think-item .n-collapse-item__header { padding: 4px 8px !important; }
+.think-head { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.think-body {
+  font-size: 12.5px; color: var(--muted); line-height: 1.7; white-space: pre-wrap;
+  background: var(--hover); border-radius: 8px; padding: 8px 12px; max-height: 260px; overflow-y: auto;
+}
+
+/* ---- 工具调用分组 ---- */
+.tool-groups { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.tool-collapse { margin-top: 0; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); }
+.tool-item .n-collapse-item__header { padding: 6px 10px !important; }
+.tool-item .n-collapse-item__content { padding: 0 4px 6px !important; }
+.tool-head { display: flex; align-items: center; gap: 6px; font-size: 12px; width: 100%; }
+.tool-ico { color: var(--accent); flex: 0 0 auto; }
+.tool-name { font-weight: 600; }
+.tool-arg { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 320px; }
+.tool-head .spin { margin-left: auto; }
+.tool-head .n-tag { margin-left: auto; }
+.tool-call-item { margin: 4px 8px 0; }
+.tool-call-item:first-of-type { margin-top: 0; }
+.tool-call-idx { padding: 0 2px 2px; }
+.tool-body {
+  margin: 0; padding: 8px 10px; border-radius: 8px; font-size: 12px; line-height: 1.6;
+  background: var(--hover); color: var(--text); overflow-x: auto;
+  font-family: "SF Mono", Consolas, Menlo, monospace; white-space: pre-wrap; word-break: break-word;
+}
+
+/* ---- 等待模型回复的 loading 气泡 ---- */
+.waiting-bubble { display: inline-flex; align-items: center; gap: 10px; }
+.dots { display: inline-flex; gap: 4px; align-items: center; }
+.dots i {
+  width: 6px; height: 6px; border-radius: 50%; background: var(--accent);
+  animation: dot-bounce 1.2s ease-in-out infinite;
+}
+.dots i:nth-child(2) { animation-delay: .18s; }
+.dots i:nth-child(3) { animation-delay: .36s; }
+@keyframes dot-bounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: .45; }
+  30% { transform: translateY(-4px); opacity: 1; }
+}
+
+/* ---- 发送/停止按钮 ---- */
+.stop-btn { animation: pop-in .16s ease; }
+.stop-btn svg { fill: currentColor; } /* 停止键用实心方块更醒目 */
+@keyframes pop-in { from { transform: scale(.7); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 
 /* ============ 空态首页（WorkBuddy 风格） ============ */
 .hero { margin: auto; padding: 20px 24px 40px; max-width: 780px; width: 100%; }
@@ -288,19 +387,7 @@ body {
 .composer-foot { max-width: 900px; margin: 6px auto 0; text-align: center; }
 .composer-foot span { display: inline-flex; align-items: center; gap: 6px; }
 
-/* ============ 工具调用块 ============ */
-.tool-collapse { margin-top: 8px; }
-.tool-item .n-collapse-item__header { padding: 6px 10px !important; }
-.tool-head { display: flex; align-items: center; gap: 6px; font-size: 12px; width: 100%; }
-.tool-ico { color: var(--accent); flex: 0 0 auto; }
-.tool-name { font-weight: 600; font-family: "SF Mono", Consolas, monospace; }
-.tool-arg { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 320px; }
-.tool-head .spin { margin-left: auto; }
-.tool-head .n-tag { margin-left: auto; }
-.tool-body {
-  white-space: pre-wrap; color: var(--muted); font-size: 12px;
-  font-family: "SF Mono", Consolas, monospace; padding: 4px 10px 8px; margin: 0;
-}
+/* 旋转加载动画（工具执行中 / 思考中通用；工具块样式见消息区） */
 .spin { animation: spin 1s linear infinite; color: var(--accent); }
 @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -606,6 +693,14 @@ body {
   .avatar { display: none; }
   .modal-actions .n-button { flex: 1 1 auto; }
   .page-title .count { display: none; }
+}
+
+/* 极窄屏（如折叠屏外屏 / 小窗口）：右面板 tab 只留图标，
+   否则第 4 个 tab 会伸到面板操作按钮之下并被截断 */
+@media (max-width: 480px) {
+  .tab-label .tab-text { display: none; }
+  .tab-label { gap: 0; }
+  .conv-running { display: none; } /* 会话行宽度有限，运行态让位于标题 */
 }
 
 /* 横屏矮视口（如手机横屏）：压缩纵向留白，保证对话区可用高度 */

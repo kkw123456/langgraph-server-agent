@@ -11,12 +11,14 @@ export interface Message {
   role: 'user' | 'assistant'
   content: string
   tool_calls?: ToolCall[]
+  reasoning?: string // 思考链（deepseek/ark 等模型），历史消息一并返回
 }
 
 export interface Conversation {
   id: string
   title: string
   updated_at?: number
+  running?: boolean // 后端标记：该会话是否有正在进行的对话轮次
 }
 
 export interface Skill {
@@ -43,13 +45,16 @@ export interface PendingToolCall {
 export type WsEvent =
   | { type: 'message_start' }
   | { type: 'token'; content: string }
+  | { type: 'reasoning'; content: string }
   | { type: 'tool_start'; name: string; input: string }
   | { type: 'tool_end'; output: string }
-  | { type: 'message_end' }
+  | { type: 'message_end'; stopped?: boolean }
   | { type: 'error'; content: string }
   | { type: 'tool_confirm'; tool_calls: PendingToolCall[] }
   | { type: 'mode_set'; mode: ToolMode }
   | { type: 'warn'; content: string }
+  // 断线重连回放：events 为该轮已发生的事件，前端按原序重放即可续看
+  | { type: 'resume'; events: WsEvent[]; mode?: ToolMode }
 
 export interface CreateSkillPayload {
   name: string

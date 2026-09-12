@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS messages (
     role        TEXT NOT NULL,
     content     TEXT NOT NULL DEFAULT '',
     tool_calls  TEXT,
+    reasoning   TEXT,
     FOREIGN KEY (cid) REFERENCES conversations(id) ON DELETE CASCADE
 );
 
@@ -62,6 +63,10 @@ class ConversationStore:
         conn = self._conn()
         with conn:
             conn.executescript(SCHEMA)
+            # 旧库迁移：messages 表补 reasoning（思考链）列
+            cols = [r[1] for r in conn.execute("PRAGMA table_info(messages)").fetchall()]
+            if "reasoning" not in cols:
+                conn.execute("ALTER TABLE messages ADD COLUMN reasoning TEXT")
 
     # ---------- 元数据 ----------
     def list(self) -> list:
@@ -127,6 +132,10 @@ class ConversationStore:
                     m["tool_calls"] = json.loads(r["tool_calls"])
                 except Exception:
                     m["tool_calls"] = []
+            # 思考链（deepseek/ark 等模型）：历史消息一并返回，前端默认折叠展示
+            reasoning = r["reasoning"] if "reasoning" in r.keys() else None
+            if reasoning:
+                m["reasoning"] = reasoning
             out.append(m)
         return out
 
@@ -136,8 +145,8 @@ class ConversationStore:
         with conn:
             conn.execute("DELETE FROM messages WHERE cid = ?", (cid,))
             conn.executemany(
-                "INSERT INTO messages (cid, seq, role, content, tool_calls) "
-                "VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO messages (cid, seq, role, content, tool_calls, reasoning) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
                 [
                     (
                         cid,
@@ -147,6 +156,7 @@ class ConversationStore:
                         json.dumps(m["tool_calls"], ensure_ascii=False)
                         if m.get("tool_calls")
                         else None,
+                        m.get("reasoning") or None,
                     )
                     for i, m in enumerate(messages)
                 ],
