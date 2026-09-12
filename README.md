@@ -44,7 +44,7 @@
 ├── requirements.txt          # Python 依赖
 ├── run.sh                    # 一键安装依赖并启动后端
 ├── agent/                    # Agent 构建（模型、系统提示词、工具聚合）
-├── auth/                     # 登录认证（login.html + 签名令牌/限流逻辑）
+├── auth/                     # 服务端认证（签名令牌、限流、常量时间凭据比对）
 ├── conversation/             # 会话存储（SQLite 元数据 + 消息历史，含 JSON 迁移脚本）
 ├── deploy/                   # 自动化部署（deploy.py 打包上传 + server_setup.sh）
 ├── skills/                   # 技能注册表 + 内置/自定义技能
@@ -53,7 +53,9 @@
 ├── vite.config.ts            # base: '/static/'，dev 代理 /api、/ws → :8000
 ├── tsconfig.json
 ├── package.json
-├── src/                      # 前端源码（main.ts、store.ts、api.ts、types.ts、App.vue、components/*）
+├── src/                      # 前端源码（main.ts、router.ts、store.ts、auth.ts、api.ts、types.ts）
+│   ├── views/                # 路由页面（Login.vue 登录页、Home.vue 主界面）
+│   └── components/           # 复用组件（ChatWindow、RightPanel 等）
 └── static/                   # 生产构建产物（由 FastAPI 的 StaticFiles 直接托管）
 ```
 
@@ -123,7 +125,7 @@ npm run build      # 输出到 static/，之后访问 http://localhost:8000/ 即
 
 | 能力 | 说明 |
 |---|---|
-| 登录页 | `/login`，未登录访问 `/` 会 302 跳转过去 |
+| 登录页 | `src/views/Login.vue`，路由 `/login`；未登录访问 `/` 由前端路由守卫跳转 |
 | 会话保持 | 签名令牌存于 **HttpOnly Cookie**，JS 读不到，降低 XSS 窃取风险 |
 | 有效期 | 勾选「记住我」7 天，否则 12 小时 |
 | 接口保护 | 全部 14 个 REST 接口返回 401；WebSocket 以 `4401` 关闭 |
@@ -195,7 +197,7 @@ tail -f /var/log/langgraph-agent.log  # 应用日志
 ### 认证（Auth）
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| `GET` | `/login` | 登录页面（已登录会自动跳回 `/`） |
+| `GET` | `/login` | 登录页面（Vue 路由，已登录自动跳回 `/`） |
 | `POST` | `/api/auth/login` | 登录，body: `{"username","password","remember"}`，成功后下发 HttpOnly Cookie |
 | `POST` | `/api/auth/logout` | 退出登录，清除 Cookie |
 | `GET` | `/api/auth/check` | 查询登录态，返回 `{"authenticated","username","enabled"}` |
