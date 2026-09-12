@@ -150,14 +150,19 @@ WS /ws/{cid}
 ## 技能管理
 
 ### 内置技能
-| id | 名称 | 提供工具 |
-|---|---|---|
-| `system` | 系统 | `get_current_datetime` |
-| `math` | 数学 | `calculator` |
-| `web` | 网络 | `web_fetch` |
-| `coder` | 代码执行 | `run_python`、`list_dir`、`read_file` |
+技能按 **目录（分类）** 组织，Web 端「技能目录」面板按分类分组展示。
 
-默认启用：`system`、`math`、`web`、`coder`。
+| 分类 | id | 名称 | 提供工具 |
+|---|---|---|---|
+| 系统 | `system` | 系统工具 | `get_current_datetime` |
+| 文件 | `file` | 文件操作 | `read_file`、`write_file`、`list_dir`、`make_dir`、`search_files`、`delete_file` |
+| 代码 | `coder` | 代码执行 | `run_python` |
+| 网络 | `web` | 网页抓取 | `web_fetch` |
+| 数学 | `math` | 数学计算 | `calculator` |
+
+> 文件类工具（`read_file` / `write_file` / `list_dir` / `make_dir` / `search_files` / `delete_file`）全部限定在**当前会话隔离的工作目录**内，越界路径会被拦截。
+
+默认启用：`system`、`math`、`web`、`coder`、`file`。
 
 ### 自定义技能
 在「技能」面板点击「新建」，提交一段 Python 代码，用 `@tool` 装饰函数定义工具，可选 `META` 元信息：

@@ -36,7 +36,7 @@ class AgentManager:
         if skills:
             lines.append("\n当前已启用的技能包：")
             for s in skills:
-                lines.append(f"- 【{s.name}】{s.description}")
+                lines.append(f"- 【{s.category}/{s.name}】{s.description}")
                 if s.system_prompt:
                     lines.append(f"   提示: {s.system_prompt}")
         else:

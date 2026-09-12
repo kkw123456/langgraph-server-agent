@@ -89,3 +89,67 @@ async def read_file(path: str) -> str:
             return f.read(4000)
     except Exception as e:
         return f"错误: {e}"
+
+
+@tool
+async def write_file(path: str, content: str) -> str:
+    """将文本内容写入当前会话工作目录下的文件（覆盖写，自动创建父目录）。返回写入的字节数。"""
+    try:
+        full = _safe_path(path)
+        parent = os.path.dirname(full)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        with open(full, "w", encoding="utf-8") as f:
+            f.write(content)
+        return f"已写入 {len(content.encode('utf-8'))} 字节到 {path}"
+    except Exception as e:
+        return f"错误: {e}"
+
+
+@tool
+async def make_dir(path: str) -> str:
+    """在当前会话工作目录内创建目录（支持多级）。"""
+    try:
+        os.makedirs(_safe_path(path), exist_ok=True)
+        return f"已创建目录: {path}"
+    except Exception as e:
+        return f"错误: {e}"
+
+
+@tool
+async def search_files(pattern: str, path: str = ".") -> str:
+    """在当前会话工作目录内递归检索文本文件内容，返回匹配的行（大小写不敏感的子串匹配，最多 200 行）。"""
+    try:
+        root = _safe_path(path)
+        results: list = []
+        for dirpath, _, files in os.walk(root):
+            for fn in files:
+                fp = os.path.join(dirpath, fn)
+                try:
+                    with open(fp, "r", encoding="utf-8", errors="ignore") as f:
+                        for i, line in enumerate(f, 1):
+                            if pattern.lower() in line.lower():
+                                rel = os.path.relpath(fp, root)
+                                results.append(f"{rel}:{i}: {line.rstrip()}")
+                except Exception:
+                    continue
+                if len(results) >= 200:
+                    break
+            if len(results) >= 200:
+                break
+        return "\n".join(results) if results else "(无匹配)"
+    except Exception as e:
+        return f"错误: {e}"
+
+
+@tool
+async def delete_file(path: str) -> str:
+    """删除当前会话工作目录下的文件（仅文件，不删除目录）。"""
+    try:
+        full = _safe_path(path)
+        if not os.path.isfile(full):
+            return f"不是文件或不存在: {path}"
+        os.remove(full)
+        return f"已删除: {path}"
+    except Exception as e:
+        return f"错误: {e}"

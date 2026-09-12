@@ -12,3 +12,4 @@ class Skill:
     tools: List[BaseTool] = field(default_factory=list)
     system_prompt: str = ""
     builtin: bool = True
+    category: str = "通用"

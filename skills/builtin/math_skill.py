@@ -9,4 +9,5 @@ def get_skill() -> Skill:
         description="安全计算数学表达式，支持 sqrt/sin/log/pi 等函数与常量。",
         tools=[calculator],
         system_prompt="当用户需要数学计算时，优先使用 calculator 工具。",
+        category="数学",
     )

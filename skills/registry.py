@@ -11,7 +11,7 @@ from skills.base import Skill
 from skills import builtin as builtin_pkg
 
 # 默认启用的内置技能
-DEFAULT_ENABLED = {"system", "math", "web", "coder"}
+DEFAULT_ENABLED = {"system", "math", "web", "coder", "file"}
 
 
 class SkillRegistry:
@@ -85,6 +85,7 @@ class SkillRegistry:
         for s in self.skills.values():
             out.append({
                 "id": s.id, "name": s.name, "description": s.description,
+                "category": s.category,
                 "builtin": s.builtin, "enabled": self.enabled.get(s.id, False),
                 "tools": [t.name for t in s.tools],
             })

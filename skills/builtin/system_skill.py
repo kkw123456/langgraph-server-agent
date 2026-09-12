@@ -9,4 +9,5 @@ def get_skill() -> Skill:
         description="查询服务器当前时间等基础信息。",
         tools=[get_current_datetime],
         system_prompt="你可以查询服务器当前时间。",
+        category="系统",
     )
