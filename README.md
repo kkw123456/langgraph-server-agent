@@ -9,7 +9,7 @@
 
 ## 功能特性
 
-- **多会话管理**：每个会话独立 `thread_id`，对话历史持久化（SQLite 检查点 + JSON 消息记录），可新建 / 切换 / 重命名 / 删除。
+- **多会话管理**：每个会话独立 `thread_id`，对话历史全量持久化到 SQLite（检查点 `data/checkpoints.db` + 会话消息 `data/app.db`），可新建 / 切换 / 重命名 / 删除。重启服务后历史不丢。
 - **流式对话**：通过 WebSocket 实时推送 `message_start / token / tool_start / tool_end / message_end / error` 事件，前端逐字渲染。
 - **工具调用权限确认**：支持 **自动（auto）** 与 **确认（confirm）** 两种模式。确认模式下，每次工具调用前会暂停并向用户弹出审批框，可逐条 **允许 / 拒绝**，并 **编辑工具参数**；拒绝的工具不会执行。模式可在对话顶部一键切换，并通过 WebSocket 实时同步到后端。
 - **工具调用**：内置数学计算、网页抓取、受限 Python 执行、文件读写、时间查询等工具；每次调用在界面中以可折叠块展示输入 / 输出。
@@ -44,7 +44,7 @@
 ├── requirements.txt          # Python 依赖
 ├── run.sh                    # 一键安装依赖并启动后端
 ├── agent/                    # Agent 构建（模型、系统提示词、工具聚合）
-├── conversation/             # 会话存储（JSON 元数据 + 消息历史）
+├── conversation/             # 会话存储（SQLite 元数据 + 消息历史，含 JSON 迁移脚本）
 ├── skills/                   # 技能注册表 + 内置/自定义技能
 ├── tools/                    # 内置工具（calculator、web_fetch、run_python、list_dir、read_file …）
 ├── index.html                # Vite 入口
@@ -226,6 +226,42 @@ def my_tool(query: str) -> str:
 - 通过 `contextvars.ContextVar` 携带「当前会话工作目录」，并发多会话各自独立、不会串台。
 - `server.run_turn` 在每轮对话开始 `set`、结束 `reset` 该上下文；`run_python` 子进程以该目录为 `cwd`，脚本产物自动落在其内。
 - Web 端可在「文件」标签页浏览隔离目录，让 Agent 写文件后刷新即可看到产物。
+
+---
+
+## 数据存储
+
+全部运行时数据均为 **SQLite**，位于 `data/` 下：
+
+| 文件 | 用途 | 管理方 |
+|---|---|---|
+| `data/app.db` | 会话元数据 + 消息历史（`conversations` / `messages` 两张表） | `conversation/store.py` |
+| `data/checkpoints.db` | LangGraph 对话状态检查点，支撑多轮上下文与工具审批中断 | `AsyncSqliteSaver` |
+| `data/workspaces/{cid}/` | 会话隔离工作目录（普通文件，非数据库） | `workspace.py` |
+
+**`app.db` 表结构**
+
+```sql
+conversations(id TEXT PK, title TEXT, created_at REAL, updated_at REAL)
+messages(id INTEGER PK AUTOINCREMENT, cid TEXT FK→conversations.id ON DELETE CASCADE,
+         seq INTEGER, role TEXT, content TEXT, tool_calls TEXT /* JSON */)
+```
+
+- 消息按 `seq` 排序，`tool_calls` 以 JSON 文本存储；`save_messages` 在单事务内全量覆盖写入，保证原子性。
+- 删除会话通过外键级联清理消息，不留孤儿行。
+- 连接按线程惰性创建并复用（`sqlite3` 连接不可跨线程共享），启用 WAL 模式提升并发表现；所有 SQL 参数化绑定。
+
+**从旧版 JSON 数据结构迁移**（v1 → v2）
+
+旧版本把会话存在 `data/conversations/index.json` 与 `{cid}.json`。若你从旧版本升级，执行：
+
+```bash
+python3 -m conversation.migrate            # 干跑：先看会迁移哪些
+python3 -m conversation.migrate --apply    # 实际写入
+python3 -m conversation.migrate --apply --clean   # 写入成功后删除旧 JSON 文件
+```
+
+迁移是**幂等**的（已存在的 `cid` 会跳过），且默认保留原始 JSON 文件以便回滚。全新部署无需执行。
 
 ---
 
