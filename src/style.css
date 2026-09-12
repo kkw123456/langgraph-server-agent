@@ -18,43 +18,93 @@
   --rail: 56px;
   --rail-bg: #f1f3f6;
   --topbar-h: 52px;
+
+  /* ---- 自适应尺寸：下列变量为布局的唯一真相来源 ---- */
+  /* 应用总高：dvh 在移动端浏览器地址栏收起时不会跳动，旧浏览器回退到 vh */
+  --app-h: 100dvh;
+  /* 左侧会话栏宽度 / 右侧结果面板宽度：由 Home.vue 在运行时覆写 */
+  --sidebar-w: 260px;
+  --panel-w: 360px;
+  /* 右侧面板收起后仅保留的图标条宽度 */
+  --panel-rail: 52px;
+  /* 底部 Tab 栏高度（仅手机尺寸生效） */
+  --tabbar-h: 56px;
+  /* 内容最大宽度：超宽屏下避免行宽过长影响阅读 */
+  --content-max: 1680px;
+}
+
+@supports not (height: 100dvh) {
+  :root { --app-h: 100vh; }
 }
 
 html, body, #app { height: 100%; }
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   background: var(--bg); color: var(--text); font-size: 14px; -webkit-font-smoothing: antialiased;
+  /* 移动端横竖屏切换时不缩放字号，避免 iOS 自动放大 */
+  -webkit-text-size-adjust: 100%;
 }
 .muted { color: var(--muted); }
 .tiny { font-size: 12px; }
 
+/* ---- 少量通用工具类：替代散落的行内样式，便于统一做响应式调整 ---- */
+.mb-8 { margin-bottom: 8px; }
+.mb-10 { margin-bottom: 10px; }
+.mt-8 { margin-top: 8px; }
+.ml-6 { margin-left: 6px; }
+.ml-8 { margin-left: 8px; }
+/* 卡片右下角的一排图标按钮：窄屏会自动换行而不是溢出 */
+.btn-group { display: inline-flex; align-items: center; gap: 2px; flex-wrap: wrap; }
+.btn-group.gap-4 { gap: 4px; }
+/* 描述文字默认预留两行高度以对齐卡片，平面卡片不需要 */
+.card-desc-flat { min-height: 0; }
+/* 设置页内容区：卡片内嵌套时去掉宽度上限 */
+.set-body-flat { max-width: none; }
+.set-val-inline { display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+/* 页面主体不留顶部内边距（标签页紧贴标题时使用） */
+.page-body-flush { padding-top: 0; }
+.experts-tabs { margin-bottom: 8px; }
+/* 灵感页：分类标签左对齐 / 搜索框可收缩 */
+.idea-cats { justify-content: flex-start; margin-bottom: 16px; }
+.idea-search { width: 240px; max-width: 100%; }
+
 /* ============ 总布局：顶部工具栏 + 左图标条 + 中/右侧内容 ============ */
 /* 外层纵向：toolbar 固定高度，下方是「左图标条 + 内容区」的横向双列 */
-#app { height: 100vh; }
-.app-root { display: grid; grid-template-rows: var(--topbar-h) 1fr; height: 100vh; overflow: hidden; }
+#app { height: var(--app-h); }
+.app-root {
+  display: grid; grid-template-rows: var(--topbar-h) 1fr;
+  height: var(--app-h); overflow: hidden;
+}
 
 /* --- 顶部工具栏 --- */
 .toolbar {
   display: flex; align-items: center; gap: 10px; padding: 0 12px;
   background: var(--panel); border-bottom: 1px solid var(--border);
   -webkit-app-region: drag; user-select: none;
+  min-width: 0; overflow: hidden;
 }
 .toolbar > * { -webkit-app-region: no-drag; }
-.tb-brand { display: flex; align-items: center; gap: 8px; width: calc(var(--rail) + 108px); flex: 0 0 auto; }
+.tb-brand { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.tb-brand b { font-size: 14px; letter-spacing: .2px; }
+/* 品牌文字区宽度与左图标条对齐，让下方三栏的起点视觉上一致 */
+.tb-brand { width: calc(var(--rail) + 108px); }
 .tb-logo {
   width: 26px; height: 26px; border-radius: 8px; display: flex; align-items: center; justify-content: center;
   background: linear-gradient(135deg, var(--accent), #5b8def); color: #fff; flex: 0 0 auto;
 }
-.tb-brand b { font-size: 14px; letter-spacing: .2px; }
 .tb-model { width: 190px; flex: 0 0 auto; }
-.tb-search { flex: 1; max-width: 520px; }
+.tb-search { flex: 1 1 auto; min-width: 0; max-width: 520px; }
 .tb-right { margin-left: auto; display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
 .status { font-size: 12px; color: var(--muted); display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
-.status::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: #c9ced6; }
+.status::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: #c9ced6; flex: 0 0 auto; }
 .status.on::before { background: var(--ok); box-shadow: 0 0 0 3px #e6f4ea; }
 .user-btn .uname { max-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .user-btn .logout-glyph { margin-left: 6px; opacity: .55; }
 .user-btn:hover .logout-glyph { opacity: 1; }
+/* 汉堡按钮只在窄屏出现，用于唤出抽屉导航 */
+.tb-burger { display: none; flex: 0 0 auto; }
+/* 工具权限模式：窄屏下只留首字，节省横向空间 */
+.mode-abbr { display: none; }
 
 /* --- 外层：左图标条 + 内容区 --- */
 .app-body { display: grid; grid-template-columns: var(--rail) 1fr; min-height: 0; overflow: hidden; }
@@ -83,21 +133,51 @@ body {
 /* --- 内容区：由路由决定是「主界面」还是「功能页」 --- */
 .content { min-width: 0; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
 
+/* 超宽屏下限制内容宽度并居中，避免在大屏上文本行过长、卡片被拉得过宽 */
+.content > .page > .page-body { width: 100%; }
+@media (min-width: 1800px) {
+  .page-head, .page-body { max-width: var(--content-max); margin-left: auto; margin-right: auto; width: 100%; }
+}
+
 /* ============ 主界面：会话栏 + 聊天 + 右侧结果面板 ============ */
-/* 注意：WorkBuddy 的三列为「会话列表 / 对话 / 结果」，均位于图标条右侧 */
+/* 注意：WorkBuddy 的三列为「会话列表 / 对话 / 结果」，均位于图标条右侧。
+   列宽由 Home.vue 通过内联 grid-template-columns 计算（依赖断点），
+   这里的默认值仅在 JS 尚未就绪时兜底。 */
 .app-shell {
-  display: grid; grid-template-columns: 260px 1fr 360px;
+  display: grid;
+  grid-template-columns: var(--sidebar-w) minmax(0, 1fr) var(--panel-w);
   height: 100%; min-height: 0; overflow: hidden;
   transition: grid-template-columns .18s ease;
 }
 .app-shell.resizing { transition: none; cursor: col-resize; }
+/* 窄屏覆盖层模式：三列塌缩成单列，两侧变为抽屉/浮层 */
+.app-shell.as-overlay { grid-template-columns: minmax(0, 1fr); }
+/* 层级约定（自下而上）：内容 1 < 遮罩 25 < 侧栏抽屉 30 < 右侧面板浮层 35 < 全局抽屉 200+
+   右侧面板高于会话抽屉：面板只会遮住右侧部分，会话抽屉仍有可见区域可点击关闭。 */
+.app-shell.as-overlay .sidebar {
+  position: absolute; top: 0; bottom: 0; left: 0; width: min(84vw, 300px); z-index: 30;
+  border-right: 1px solid var(--border); box-shadow: 0 10px 30px rgba(0,0,0,.14);
+}
+.app-shell.as-overlay .right {
+  position: absolute; top: 0; bottom: 0; right: 0; width: min(92vw, 420px); z-index: 35;
+  border-left: 1px solid var(--border); box-shadow: 0 -10px 30px rgba(0,0,0,.14);
+}
+/* 抽屉遮罩：点击关闭 */
+.shell-mask {
+  position: absolute; inset: 0; background: rgba(31, 35, 40, .38); z-index: 25;
+  animation: fade-in .16s ease;
+}
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 
 /* ============ 左侧会话栏 ============ */
 .sidebar {
   background: var(--panel); border-right: 1px solid var(--border);
-  display: flex; flex-direction: column; min-height: 0;
+  display: flex; flex-direction: column; min-height: 0; min-width: 0;
 }
-.sidebar-head { padding: 10px; border-bottom: 1px solid var(--border); }
+.sidebar-head { padding: 10px; border-bottom: 1px solid var(--border); flex: 0 0 auto; }
+/* 窄屏抽屉里「新建对话」右侧需要关闭按钮，用一行 flex 承载 */
+.sidebar-head-row { display: flex; align-items: center; gap: 6px; }
+.sidebar-close { flex: 0 0 auto; }
 .sidebar-foot { padding: 8px; border-top: 1px solid var(--border); }
 .conv-list { flex: 1; overflow-y: auto; padding: 8px; min-height: 0; }
 .conv {
@@ -123,18 +203,23 @@ body {
 .topic { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .topic h1 { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .topic-ico { color: var(--accent); flex: 0 0 auto; }
+.topic-btn { flex: 0 0 auto; }
 .topbar-right { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
 
 /* ============ 消息区 ============ */
 .chat-view { flex: 1; display: flex; flex-direction: column; min-height: 0; }
-.messages { flex: 1; overflow-y: auto; padding: 24px 0; display: flex; flex-direction: column; min-height: 0; }
+.messages {
+  flex: 1; overflow-y: auto; padding: 24px 0; display: flex; flex-direction: column; min-height: 0;
+  /* 章节：overlay 模式下聊天区需要自行滚动，避免整页被撑高 */
+  overscroll-behavior: contain;
+}
 .msg { display: flex; gap: 12px; padding: 10px 28px; max-width: 900px; width: 100%; margin: 0 auto; }
 .msg.user { justify-content: flex-end; }
 .avatar { flex: 0 0 auto; margin-top: 2px; }
 .msg.user .avatar { order: 2; }
 .bubble {
   padding: 11px 15px; border-radius: 14px; line-height: 1.65; font-size: 14px;
-  white-space: pre-wrap; word-break: break-word; max-width: 720px;
+  white-space: pre-wrap; word-break: break-word; max-width: min(720px, 100%); min-width: 0;
 }
 .msg.user .bubble { background: var(--user); color: #fff; border-bottom-right-radius: 4px; order: 1; }
 .msg.assistant .bubble { background: var(--panel); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
@@ -162,8 +247,13 @@ body {
 .scene-tab:hover { color: var(--text); border-color: var(--border-strong); }
 .scene-tab.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 500; }
 
-/* 快捷入口卡片 */
+/* 快捷入口卡片：列宽 232px 起自动填充，窄屏自然降到单列 */
 .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(232px, 1fr)); gap: 10px; }
+/* 超窄屏时卡片内边距与图标略收，保证一行能放下标题 */
+@media (max-width: 560px) {
+  .cards { grid-template-columns: 1fr; }
+  .qcard { padding: 11px 12px; }
+}
 .qcard {
   display: flex; align-items: flex-start; gap: 10px; text-align: left;
   background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
@@ -180,6 +270,8 @@ body {
 
 /* ============ 输入区 ============ */
 .composer { padding: 12px 28px 16px; background: var(--bg); flex: 0 0 auto; }
+/* 底部安全区：iOS/Android 全面屏下避免输入框被手势条遮挡 */
+.composer { padding-bottom: max(16px, env(safe-area-inset-bottom)); }
 .composer-inner {
   max-width: 900px; margin: 0 auto; display: flex; flex-direction: column; gap: 6px;
   background: var(--panel); border: 1px solid var(--border-strong); border-radius: 14px;
@@ -188,8 +280,10 @@ body {
 .composer-inner:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-weak); }
 .composer-input { flex: 1; }
 .composer-input .n-input__textarea-el { padding: 4px 0; }
-.composer-bar { display: flex; align-items: center; gap: 8px; }
-.composer-bar .grow { flex: 1; }
+.composer-bar { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.composer-bar .grow { flex: 1; min-width: 0; }
+/* 模型选择器在窄屏会挤压发送按钮，用 CSS 变量控制宽度便于断点收窄 */
+.composer-model { width: 168px; flex: 0 0 auto; }
 .send-btn { flex: 0 0 auto; width: 32px; height: 32px; }
 .composer-foot { max-width: 900px; margin: 6px auto 0; text-align: center; }
 .composer-foot span { display: inline-flex; align-items: center; gap: 6px; }
@@ -213,20 +307,45 @@ body {
 /* ============ 右侧结果面板 ============ */
 .right {
   position: relative; background: var(--panel); border-left: 1px solid var(--border);
-  display: flex; flex-direction: column; min-height: 0; overflow: hidden;
+  display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden;
 }
-.right.fullscreen { position: fixed; inset: 0; z-index: 40; border-left: none; }
+.right.fullscreen { position: fixed; inset: 0; z-index: 45; border-left: none; width: auto !important; }
 .right.st-collapsed { display: none; }
+/* 窄屏下由 Home.vue 加 .as-overlay，面板改为浮层（绝对定位于 .app-shell 内） */
+.right.as-overlay { animation: slide-in-right .18s ease; }
+@keyframes slide-in-right {
+  from { transform: translateX(12px); opacity: .4; }
+  to   { transform: translateX(0); opacity: 1; }
+}
 .rail-icons { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 12px 0; }
 .resize-handle {
   position: absolute; top: 0; bottom: 0; left: -4px; width: 8px; cursor: col-resize; z-index: 10;
 }
 .resize-handle:hover { background: var(--accent); opacity: .3; }
-.panel-tabs { display: flex; align-items: center; border-bottom: 1px solid var(--border); height: 44px; padding-right: 8px; flex: 0 0 auto; }
-.rp-tabs { flex: 1; min-width: 0; }
+.panel-tabs { display: flex; align-items: center; border-bottom: 1px solid var(--border); height: 44px; padding-right: 8px; flex: 0 0 auto; min-width: 0; }
+.rp-tabs { flex: 1; min-width: 0; overflow: hidden; }
+/* 标签页共 4 个，窄面板下需要允许横向滚动，否则会把容器撑破。
+   注意：Naive UI 的滚动层自带 min-width:100%，必须显式覆盖为 auto，
+   否则它会被内容撑到内容宽度，overflow-x:auto 形同虚设。 */
+.rp-tabs .n-tabs-nav-scroll-content {
+  overflow-x: auto; scrollbar-width: none; -ms-overflow-style: none;
+  min-width: 0 !important;
+  /* 该层被 Naive UI 设为 flex 且 flex:none，会按内容宽度撑开父级，
+     必须允许收缩，内部的滚动条才会真正生效 */
+  flex: 1 1 auto !important;
+  max-width: 100%;
+}
+.rp-tabs .n-tabs-nav-scroll-content::-webkit-scrollbar { display: none; }
+/* 逐层解除 min-width:auto 的收缩限制：nav → 滚动包装层 → 标签行，
+   否则 flex 子项仍会按内容宽度撑开，滚动条永远不会出现 */
+.rp-tabs .n-tabs-nav { min-width: 0; }
+.rp-tabs .n-tabs-wrapper { min-width: 0; }
+.rp-tabs .n-tabs-tab { flex: 0 0 auto; }
 .rp-tabs .n-tabs-nav { height: 43px; }
-.rp-actions { display: flex; align-items: center; gap: 2px; }
+.rp-actions { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; }
 .rot { transform: rotate(180deg); }
+/* 面板标签文字：宽度不足时由 .tab-label 的文本截断兜底 */
+.tab-label { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
 
 /* 文件面板 */
 .file-panel { flex: 1; display: flex; flex-direction: column; min-height: 0; }
@@ -263,30 +382,30 @@ body {
 .ac-meta { font-size: 11px; }
 
 /* ============ 功能页通用外壳（项目 / 自动化 / 资料库 / 技能） ============ */
-.page { flex: 1; display: flex; flex-direction: column; min-height: 0; background: var(--bg); }
+.page { flex: 1; display: flex; flex-direction: column; min-height: 0; background: var(--bg); overflow: hidden; }
 .page-head {
   display: flex; align-items: center; justify-content: space-between; gap: 16px;
   padding: 20px 26px 14px; flex-wrap: wrap; flex: 0 0 auto;
 }
-.page-title { display: flex; align-items: center; gap: 10px; }
-.page-title h1 { font-size: 19px; font-weight: 600; }
-.page-title .count { font-size: 12px; }
-.page-actions { display: flex; align-items: center; gap: 8px; }
-.page-body { flex: 1; overflow-y: auto; padding: 0 26px 32px; min-height: 0; }
+.page-title { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.page-title h1 { font-size: 19px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.page-title .count { font-size: 12px; white-space: nowrap; }
+.page-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.page-body { flex: 1; overflow-y: auto; padding: 0 26px 32px; min-height: 0; overscroll-behavior: contain; }
 .page-empty { padding: 56px 20px; }
 .grid-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
 
 /* ============ 技能管理页 ============ */
 .skill-manager { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 .sm-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 18px 24px; flex-wrap: wrap; }
-.sm-title { display: flex; align-items: center; gap: 10px; }
-.sm-title h2 { font-size: 19px; }
-.sm-count { font-size: 12px; }
-.sm-actions { display: flex; align-items: center; gap: 8px; }
-.sm-search { width: 210px; }
+.sm-title { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.sm-title h2 { font-size: 19px; white-space: nowrap; }
+.sm-count { font-size: 12px; white-space: nowrap; }
+.sm-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.sm-search { width: 210px; max-width: 100%; }
 .sm-cats { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 24px 12px; }
 .cat-chip { cursor: pointer; }
-.sm-body { flex: 1; overflow-y: auto; padding: 6px 24px 28px; }
+.sm-body { flex: 1; overflow-y: auto; padding: 6px 24px 28px; min-height: 0; overscroll-behavior: contain; }
 .sm-group { margin-bottom: 22px; }
 .group-title { font-size: 13px; color: var(--muted); margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
 .sm-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
@@ -329,55 +448,177 @@ body {
 .au-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 
 /* 资料库 */
-.lib-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
-.lib-search { width: 260px; }
+.lib-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+.lib-search { width: 260px; max-width: 100%; }
 .lib-list { display: flex; flex-direction: column; gap: 10px; }
 .lib-card { }
-.lb-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.lb-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; min-width: 0; }
 .lb-title { flex: 1; font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lb-content {
   font-size: 12.5px; color: var(--muted); line-height: 1.6; white-space: pre-wrap;
   word-break: break-word; max-height: 120px; overflow: hidden; margin-bottom: 8px;
 }
-.lb-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.lb-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 .lb-tags { display: flex; flex-wrap: wrap; gap: 6px; }
 
 /* 设置页 */
 .set-body { display: flex; flex-direction: column; gap: 14px; max-width: 760px; }
-.set-row { display: flex; align-items: center; gap: 12px; }
+.set-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .set-label { width: 130px; flex: 0 0 auto; font-size: 13px; color: var(--muted); }
-.set-val { flex: 1; min-width: 0; }
+/* 标签行需要图标 + 文字时用 flex，保持与纯文字标签对齐 */
+.set-label { display: inline-flex; align-items: center; gap: 6px; }
+.set-val { flex: 1 1 200px; min-width: 0; }
 .set-mono { font-family: "SF Mono", Consolas, monospace; font-size: 12.5px; word-break: break-all; }
+.set-select { width: 260px; max-width: 100%; }
 
 /* ============ 弹窗 ============ */
-.modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.modal-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
 .modal-card { border-radius: 14px; }
+/* 弹窗统一使用「视口百分比 + 上限」的宽度，避免小屏横向溢出 */
+.modal-w-sm { width: min(460px, 92vw); }
+.modal-w-md { width: min(540px, 92vw); }
+.modal-w-lg { width: min(580px, 94vw); }
 .form-grid { display: flex; flex-direction: column; gap: 2px; }
 
 /* 工具确认弹窗 */
 .confirm-card { border-radius: 14px; }
 .confirm-alert { margin-bottom: 12px; }
-.confirm-list { display: flex; flex-direction: column; gap: 12px; max-height: 50vh; overflow-y: auto; padding-right: 4px; }
+.confirm-list { display: flex; flex-direction: column; gap: 12px; max-height: min(50vh, 420px); overflow-y: auto; padding-right: 4px; }
 .confirm-row { background: var(--panel2); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; }
-.confirm-head { display: flex; align-items: center; justify-content: space-between; }
+.confirm-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 .confirm-name { font-weight: 600; color: var(--accent); font-family: "SF Mono", Consolas, monospace; font-size: 13px; display: inline-flex; align-items: center; gap: 6px; }
 .confirm-switch { display: inline-flex; align-items: center; gap: 8px; }
 .args-input { margin-top: 8px; font-family: "SF Mono", Consolas, monospace; }
 .args-err { color: var(--danger); font-size: 12px; margin-top: 4px; }
 
-/* 滚动条 */
-::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-thumb { background: #d3d9e0; border-radius: 6px; border: 2px solid transparent; background-clip: padding-box; }
-::-webkit-scrollbar-thumb:hover { background: #b9c1cb; background-clip: padding-box; }
-::-webkit-scrollbar-track { background: transparent; }
-
-/* 窄屏适配 */
-@media (max-width: 1180px) {
-  .app-shell { grid-template-columns: 220px 1fr 300px; }
-  .tb-model { width: 150px; }
+/* 滚动条：触摸设备不需要（系统自带覆盖式滚动条），省掉 10px 占宽 */
+@media (hover: hover) and (pointer: fine) {
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: #d3d9e0; border-radius: 6px; border: 2px solid transparent; background-clip: padding-box; }
+  ::-webkit-scrollbar-thumb:hover { background: #b9c1cb; background-clip: padding-box; }
+  ::-webkit-scrollbar-track { background: transparent; }
 }
+
+/* ============================================================
+   自适应：断点自宽到窄逐级收拢
+   ------------------------------------------------------------
+   断点与 src/composables/useBreakpoint.ts 保持一致：
+     1800px  内容限宽居中
+     1280px  完整三栏
+     1024px  三栏但会话栏收窄，右面板默认压到下限
+      900px  顶栏精简（品牌文字、状态文字收起）
+      767px  结构切换：左侧图标条 → 底部 Tab 栏；会话栏/右面板 → 抽屉/浮层
+      560px  卡片单列、输入区次要按钮隐藏
+   ============================================================ */
+
+/* ≥1280 与 ≥1024 之间：会话栏与右面板同时收窄，保证中间对话区不被挤压 */
+@media (max-width: 1280px) {
+  :root { --sidebar-w: 228px; --panel-w: 320px; }
+  .tb-model { width: 160px; }
+}
+
+/* 三栏下限：再窄就不适合并排，右面板宽度压到最小可用值 */
+@media (max-width: 1024px) {
+  :root { --sidebar-w: 208px; --panel-w: 288px; }
+  .tb-model { width: 140px; }
+  .msg { padding: 10px 18px; }
+  .composer { padding-left: 18px; padding-right: 18px; }
+  .page-head { padding: 16px 18px 12px; }
+  .page-body { padding: 0 18px 28px; }
+  .sm-head { padding: 14px 18px; }
+  .sm-cats { padding: 0 18px 12px; }
+  .sm-body { padding: 6px 18px 24px; }
+}
+
+/* 顶栏精简：品牌文字与状态文字收起，只留图标与控件 */
 @media (max-width: 900px) {
-  .app-shell { grid-template-columns: 200px 1fr 0px; }
-  .right.st-full { display: none; }
+  .tb-brand { width: auto; }
+  .tb-brand b { display: none; }
+  .tb-search { max-width: none; }
+}
+
+/* 结构切换：单栏 + 抽屉导航 + 底部 Tab 栏 */
+@media (max-width: 767px) {
+  :root { --rail: 0px; --topbar-h: 48px; }
+
+  /* 左侧图标条移到屏幕底部，改为横向 Tab 栏 */
+  .app-body { grid-template-columns: minmax(0, 1fr); }
+  .rail {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 50;
+    flex-direction: row; justify-content: space-around; align-items: center;
+    gap: 0; padding: 0 4px;
+    height: calc(var(--tabbar-h) + env(safe-area-inset-bottom));
+    padding-bottom: env(safe-area-inset-bottom);
+    border-right: none; border-top: 1px solid var(--border);
+    background: var(--panel);
+  }
+  .nav-item { width: 48px; height: 44px; }
+  .rail-spacer { display: none; }
+  /* 悬浮提示在触摸设备上没有意义，且会超出屏幕 */
+  .nav-tip { display: none; }
+  /* 底部 Tab 栏出现后，内容区需要留出等高空间，否则最后一行被遮挡 */
+  .content { padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom)); }
+  .composer { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+
+  /* 顶栏控件按优先级取舍：搜索框先收，汉堡按钮出现 */
   .tb-search { display: none; }
+  .tb-burger { display: inline-flex; }
+  .status { display: none; }
+  .user-btn .uname, .user-btn .logout-glyph { display: none; }
+  .mode-full { display: none; }
+  .mode-abbr { display: inline; }
+  .topbar { padding: 0 10px; gap: 8px; }
+  .topbar-right { gap: 6px; }
+
+  /* 对话区在窄屏不再有左右双列，右侧面板为浮层 */
+  .app-shell { grid-template-columns: minmax(0, 1fr); }
+  .msg { padding: 8px 12px; gap: 8px; }
+  .bubble { font-size: 14px; padding: 10px 13px; }
+  .hero { padding: 16px 14px 28px; }
+  .hero h2 { font-size: 19px; }
+  .hero-logo { width: 52px; height: 52px; border-radius: 15px; }
+  .composer { padding: 10px 12px 12px; }
+  .composer-inner { padding: 8px 8px 6px 12px; }
+  .composer-model { width: 116px; }
+  /* 输入区左侧的次要按钮在手机上隐藏，把宽度留给输入与发送 */
+  .composer-aux { display: none; }
+
+  .page-head { padding: 14px 14px 10px; gap: 10px; }
+  .page-body { padding: 0 14px 24px; }
+  .page-title h1 { font-size: 17px; }
+  .grid-cards { grid-template-columns: 1fr; }
+  .sm-grid { grid-template-columns: 1fr; }
+  .sm-head { padding: 12px 14px; }
+  .sm-cats { padding: 0 14px 10px; }
+  .sm-body { padding: 6px 14px 22px; }
+  .sm-search { width: 100%; }
+  .set-label { width: auto; }
+  .lib-search { width: 100%; }
+  .lib-toolbar .n-button { flex: 0 0 auto; }
+}
+
+/* 超窄屏：卡片单列已生效，进一步压缩次要信息 */
+@media (max-width: 560px) {
+  .tb-model { width: 118px; }
+  .cards { grid-template-columns: 1fr; }
+  .scene-tab { padding: 6px 12px; font-size: 12.5px; }
+  .msg { padding: 8px 10px; }
+  .avatar { display: none; }
+  .modal-actions .n-button { flex: 1 1 auto; }
+  .page-title .count { display: none; }
+}
+
+/* 横屏矮视口（如手机横屏）：压缩纵向留白，保证对话区可用高度 */
+@media (max-height: 560px) and (min-width: 768px) {
+  .hero { padding: 10px 20px 20px; }
+  .hero-logo { width: 44px; height: 44px; margin-bottom: 10px; border-radius: 13px; }
+  .hero h2 { font-size: 18px; }
+  .hero-slogan, .scene-tabs { margin-bottom: 10px; }
+  .messages { padding: 12px 0; }
+}
+
+/* 打印：隐藏导航与面板，只保留内容 */
+@media print {
+  .toolbar, .rail, .sidebar, .right, .composer, .page-actions { display: none !important; }
+  .app-root, .app-body, .app-shell { display: block; height: auto; overflow: visible; }
 }

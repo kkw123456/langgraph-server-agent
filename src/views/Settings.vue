@@ -64,12 +64,12 @@ onMounted(loadRuntime)
     <div class="page-body">
       <div class="set-body">
         <NCard size="small" title="模型">
-          <div class="set-body" style="max-width: none">
+          <div class="set-body set-body-flat">
             <div class="set-row">
               <span class="set-label">当前模型</span>
               <span class="set-val">
                 <NSelect
-                  style="width: 260px"
+                  class="set-select"
                   :value="wb.runtime.model"
                   :options="modelOptions"
                   :consistent-menu-width="false"
@@ -88,7 +88,7 @@ onMounted(loadRuntime)
         <NCard size="small" title="工具调用权限">
           <div class="set-row">
             <span class="set-label">权限模式</span>
-            <span class="set-val" style="display: inline-flex; align-items: center; gap: 10px">
+            <span class="set-val set-val-inline">
               <NRadioGroup
                 :value="state.mode"
                 @update:value="(v: string) => setMode(v as 'auto' | 'confirm')"
@@ -104,7 +104,7 @@ onMounted(loadRuntime)
         </NCard>
 
         <NCard size="small" title="运行时统计">
-          <div class="set-body" style="max-width: none">
+          <div class="set-body set-body-flat">
             <div class="set-row">
               <span class="set-label"><Cpu :size="14" /> 技能</span>
               <span class="set-val">
@@ -117,9 +117,9 @@ onMounted(loadRuntime)
               <span class="set-label"><Database :size="14" /> 数据</span>
               <span class="set-val">
                 <NTag size="small" :bordered="false">会话 {{ wb.runtime.conv_count }}</NTag>
-                <NTag size="small" :bordered="false" style="margin-left: 6px">项目 {{ wb.runtime.project_count }}</NTag>
-                <NTag size="small" :bordered="false" style="margin-left: 6px">自动化 {{ wb.runtime.automation_count }}</NTag>
-                <NTag size="small" :bordered="false" style="margin-left: 6px">资料 {{ wb.runtime.library_count }}</NTag>
+                <NTag size="small" :bordered="false" class="ml-6">项目 {{ wb.runtime.project_count }}</NTag>
+                <NTag size="small" :bordered="false" class="ml-6">自动化 {{ wb.runtime.automation_count }}</NTag>
+                <NTag size="small" :bordered="false" class="ml-6">资料 {{ wb.runtime.library_count }}</NTag>
               </span>
             </div>
             <div class="set-row">
@@ -128,7 +128,7 @@ onMounted(loadRuntime)
                 <NTag size="small" :bordered="false" :type="authState.enabled ? 'success' : 'default'">
                   {{ authState.enabled ? '已启用' : '未启用' }}
                 </NTag>
-                <span v-if="authState.enabled" class="muted tiny" style="margin-left: 8px">
+                <span v-if="authState.enabled" class="muted tiny ml-8">
                   当前用户：{{ authState.username }}
                 </span>
               </span>

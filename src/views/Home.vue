@@ -8,13 +8,14 @@ import {
 import {
   MessageSquare, ChevronsRight, ChevronsLeft, PanelRightOpen,
   FileText, FolderClosed, GitCompare, Maximize2, Minimize2, Download, Sparkles,
-  PanelRight, X, Wand2, Plus,
+  PanelRight, X, Wand2, Plus, PanelLeft, List,
 } from 'lucide-vue-next'
 import {
   state, loadConvs, loadSkills, selectConv, newChat, deleteConv,
   sendText, createSkill, setMode, filteredConvs,
 } from '../store'
 import type { CreateSkillPayload } from '../types'
+import { useBreakpoint } from '../composables/useBreakpoint'
 import ConversationList from '../components/ConversationList.vue'
 import ChatWindow from '../components/ChatWindow.vue'
 import FilePanel from '../components/FilePanel.vue'
@@ -26,6 +27,7 @@ const props = defineProps<{ showRight?: boolean }>()
 
 const message = useMessage()
 const dialog = useDialog()
+const bp = useBreakpoint()
 const showModal = ref(false)
 
 // 右侧面板三态：完全收起 / 只留图标 / 展开
@@ -36,15 +38,52 @@ const resizing = ref(false)
 const fullscreen = ref(false)
 const tab = ref<'artifacts' | 'files' | 'diff' | 'preview'>('files')
 
+// 会话栏在窄屏变为抽屉：默认关闭，由顶栏/气泡按钮唤出
+const sidebarOpen = ref(false)
+
+// 会话栏宽度与右侧面板宽度的上下限：中屏时同步收窄，避免挤压对话区
+const sidebarWidth = computed(() => (bp.isLg ? 260 : bp.isMd ? 224 : 208))
+const panelMin = computed(() => (bp.isMd ? 260 : 240))
+const panelMax = computed(() => (bp.isLg ? 820 : bp.isMd ? 620 : 480))
+
+// 窄屏（<1024）下三列无法并排，右侧面板与会话栏都改为覆盖层
+const overlay = computed(() => bp.overlayPanel)
+
 const fileRef = ref<InstanceType<typeof FilePanel> | null>(null)
 const selected = computed(() => fileRef.value?.selected ?? null)
 
-const gridTemplate = computed(() => {
-  if (!props.showRight) return '260px 1fr 0px'
-  if (panelState.value === 'collapsed') return '260px 1fr 0px'
-  if (panelState.value === 'icons') return '260px 1fr 52px'
-  return `260px 1fr ${panelWidth.value}px`
+// 面板实际占据的宽度：不展开/不在对话页时为 0，图标态为图标条宽度
+const panelCol = computed(() => {
+  if (!props.showRight || !bp.isMd) return 0
+  if (panelState.value === 'collapsed') return 0
+  if (panelState.value === 'icons') return 52
+  return panelWidth.value
 })
+
+// 把面板宽度写回 CSS 变量，供 .app-shell 的覆盖层样式与拖拽时使用
+watch(
+  [panelCol, sidebarWidth],
+  () => {
+    const root = document.documentElement
+    root.style.setProperty('--panel-w', `${panelCol.value || 320}px`)
+    root.style.setProperty('--sidebar-w', `${sidebarWidth.value}px`)
+  },
+  { immediate: true },
+)
+
+const gridTemplate = computed(() => {
+  // 覆盖层模式：三列塌缩为单列，两侧以绝对定位浮在内容之上
+  if (overlay.value) return 'minmax(0, 1fr)'
+  if (!props.showRight) return `${sidebarWidth.value}px minmax(0, 1fr) 0px`
+  return `${sidebarWidth.value}px minmax(0, 1fr) ${panelCol.value}px`
+})
+
+// 会话栏在桌面端常驻；窄屏仅在抽屉打开时渲染
+const sidebarVisible = computed(() => (overlay.value ? sidebarOpen.value : true))
+// 右侧面板在窄屏仅在「展开」态渲染，收起时不占位
+const panelVisible = computed(() =>
+  overlay.value ? props.showRight && panelState.value === 'full' : !!props.showRight,
+)
 
 const streaming = computed(() => !!state.live)
 const convsFiltered = computed(() => filteredConvs())
@@ -75,7 +114,8 @@ function startResize(e: MouseEvent): void {
   const startX = e.clientX
   const startW = panelWidth.value
   const onMove = (ev: MouseEvent) => {
-    panelWidth.value = Math.min(820, Math.max(260, startW + (startX - ev.clientX)))
+    // 上下限随断点变化：窄屏时不允许面板把对话区挤没
+    panelWidth.value = Math.min(panelMax.value, Math.max(panelMin.value, startW + (startX - ev.clientX)))
   }
   const onUp = () => {
     resizing.value = false
@@ -86,6 +126,17 @@ function startResize(e: MouseEvent): void {
   document.body.style.userSelect = 'none'
   window.addEventListener('mousemove', onMove)
   window.addEventListener('mouseup', onUp)
+}
+
+// 选择会话后自动收起窄屏抽屉，让对话立刻可见
+async function onSelectConv(id: string): Promise<void> {
+  sidebarOpen.value = false
+  await selectConv(id)
+}
+
+async function onCreate(): Promise<void> {
+  sidebarOpen.value = false
+  await newChat()
 }
 
 async function onSubmit(payload: CreateSkillPayload): Promise<void> {
@@ -108,26 +159,73 @@ watch(
   (v) => { if (v === 'full') tab.value = tab.value },
 )
 
+// 视口变化时的状态收敛：变窄后退出全屏、关抽屉；恢复宽屏后收起浮层
+watch(
+  () => [bp.isMd, bp.isXs] as const,
+  () => {
+    if (!bp.isMd) {
+      fullscreen.value = false
+      // 从宽屏切到窄屏：面板默认保持展开，会话栏默认收起
+      sidebarOpen.value = false
+    } else {
+      sidebarOpen.value = false
+      // 回到三栏时，避免面板仍是 collapsed 造成「什么都没有」的错觉
+      if (panelState.value === 'collapsed') panelState.value = 'full'
+    }
+  },
+)
+
+function onKeydown(e: KeyboardEvent): void {
+  if (e.key === 'Escape') {
+    if (sidebarOpen.value) sidebarOpen.value = false
+    else if (fullscreen.value) fullscreen.value = false
+  }
+}
+
 onMounted(async () => {
   await Promise.all([loadConvs(), loadSkills()])
+  window.addEventListener('keydown', onKeydown)
 })
-onBeforeUnmount(() => { document.body.style.userSelect = '' })
+onBeforeUnmount(() => {
+  document.body.style.userSelect = ''
+  window.removeEventListener('keydown', onKeydown)
+})
 </script>
 
 <template>
-  <div class="app-shell" :style="{ gridTemplateColumns: gridTemplate }" :class="{ resizing }">
-    <!-- 列 1：会话列表 -->
-    <aside class="sidebar">
+  <div
+    class="app-shell"
+    :class="{ resizing, 'as-overlay': overlay }"
+    :style="{ gridTemplateColumns: gridTemplate }"
+  >
+    <!-- 窄屏抽屉遮罩：点击或按 Esc 关闭 -->
+    <div v-if="overlay && sidebarOpen" class="shell-mask" @click="sidebarOpen = false"></div>
+
+    <!-- 列 1：会话列表（窄屏为抽屉） -->
+    <aside v-if="sidebarVisible" class="sidebar">
       <div class="sidebar-head">
-        <NButton type="primary" block @click="newChat">
-          <template #icon><Plus :size="16" /></template>
-          新建对话
-        </NButton>
+        <div class="sidebar-head-row">
+          <NButton type="primary" block @click="onCreate">
+            <template #icon><Plus :size="16" /></template>
+            新建对话
+          </NButton>
+          <NButton
+            v-if="overlay"
+            quaternary
+            circle
+            size="small"
+            class="sidebar-close"
+            title="收起会话列表"
+            @click="sidebarOpen = false"
+          >
+            <template #icon><X :size="16" /></template>
+          </NButton>
+        </div>
       </div>
       <ConversationList
         :convs="convsFiltered"
         :current="state.current"
-        @select="selectConv"
+        @select="onSelectConv"
         @delete="onDeleteConv"
       />
       <div class="sidebar-foot">
@@ -142,7 +240,19 @@ onBeforeUnmount(() => { document.body.style.userSelect = '' })
     <section class="main">
       <header class="topbar">
         <div class="topic">
-          <MessageSquare :size="15" class="topic-ico" />
+          <!-- 窄屏：唤出会话列表抽屉 -->
+          <NButton
+            v-if="overlay"
+            quaternary
+            circle
+            size="small"
+            class="topic-btn"
+            title="会话列表"
+            @click="sidebarOpen = true"
+          >
+            <template #icon><List :size="16" /></template>
+          </NButton>
+          <MessageSquare v-else :size="15" class="topic-ico" />
           <h1>{{ state.convTitle }}</h1>
         </div>
         <div class="topbar-right">
@@ -151,8 +261,13 @@ onBeforeUnmount(() => { document.body.style.userSelect = '' })
             size="small"
             @update:value="(v: string) => setMode(v as 'auto' | 'confirm')"
           >
-            <NRadioButton value="auto">自动</NRadioButton>
-            <NRadioButton value="confirm">确认</NRadioButton>
+            <NRadioButton value="auto">
+              <!-- 窄屏只显示首字，避免单选组把标题挤没 -->
+              <span class="mode-full">自动</span><span class="mode-abbr">自动</span>
+            </NRadioButton>
+            <NRadioButton value="confirm">
+              <span class="mode-full">确认</span><span class="mode-abbr">确认</span>
+            </NRadioButton>
           </NRadioGroup>
           <NButton
             v-if="showRight"
@@ -174,18 +289,18 @@ onBeforeUnmount(() => { document.body.style.userSelect = '' })
 
     <!-- 列 3：结果面板（产物 / 所有文件 / 变更预览 / 文件预览） -->
     <aside
-      v-if="showRight"
+      v-if="panelVisible"
       class="right"
-      :class="[`st-${panelState}`, { fullscreen }]"
+      :class="[`st-${panelState}`, { fullscreen, 'as-overlay': overlay }]"
     >
       <div
-        v-if="panelState === 'full'"
+        v-if="panelState === 'full' && !overlay"
         class="resize-handle"
         @mousedown.prevent="startResize"
       ></div>
 
       <!-- 收起态：仅图标条 -->
-      <div v-if="panelState === 'icons'" class="rail-icons">
+      <div v-if="panelState === 'icons' && !overlay" class="rail-icons">
         <NButton quaternary circle title="展开：产物" @click="tab = 'artifacts'; panelState = 'full'">
           <template #icon><Sparkles :size="18" /></template>
         </NButton>
@@ -231,7 +346,14 @@ onBeforeUnmount(() => { document.body.style.userSelect = '' })
                 <component :is="fullscreen ? Minimize2 : Maximize2" :size="15" />
               </template>
             </NButton>
-            <NButton quaternary circle size="small" title="收起到图标" @click="panelState = 'icons'">
+            <NButton
+              v-if="!overlay"
+              quaternary
+              circle
+              size="small"
+              title="收起到图标"
+              @click="panelState = 'icons'"
+            >
               <template #icon><PanelRight :size="15" /></template>
             </NButton>
             <NButton quaternary circle size="small" title="关闭面板" @click="panelState = 'collapsed'">

@@ -28,6 +28,27 @@
 | **中间对话区** | 会话列表 + 消息流 + 输入区（左下 `+` 附件入口、右下模型切换）。空态含 **场景 tab**（日常办公 / 代码开发 / 设计创意）与 **快捷入口卡片**，点击即新建会话并投递指令 |
 | **右侧结果面板** | **产物 / 所有文件 / 变更预览 / 文件预览** 四个标签；支持拖拽调宽、收起到图标条、完全收起、全屏四态 |
 
+#### 自适应布局
+
+四区布局会随视口宽度自动重排，**同一套代码同时适配桌面、平板与手机**，不依赖任何第三方响应式组件：
+
+| 断点 | 布局形态 |
+|---|---|
+| ≥ 1800px | 内容区限宽居中（`--content-max`），避免超宽屏下行宽过长、卡片被拉得过宽 |
+| ≥ 1280px | 完整三栏：会话栏 260px + 对话区 + 结果面板 380px（可拖拽 260–820px） |
+| 1024–1280px | 会话栏收窄至 224px、结果面板压至 320px，优先保证对话区宽度 |
+| 768–1024px | 单栏对话；会话栏与会话面板均改为**覆盖层**（会话抽屉 + 右侧浮层），顶栏搜索框收起 |
+| 767px 及以下 | 左侧图标条变为**底部 Tab 栏**；顶栏出现**汉堡按钮**唤出抽屉导航；侧栏/面板全部浮层化 |
+| ≤ 560px | 快捷卡片单列、隐藏消息头像、输入区次要按钮（附件/引用/联网）隐藏，宽度留给输入与发送 |
+
+实现要点：
+
+- 断点判定集中在 `src/composables/useBreakpoint.ts`，用 `matchMedia` 监听并提供 `isLg / isMd / isSm / isXs`，结构差异（抽屉 vs 常驻）由 JS 决定，样式细节交给 `style.css` 的媒体查询。
+- 尺寸通过 CSS 变量（`--app-h`、`--sidebar-w`、`--panel-w`、`--tabbar-h`）下发，运行时可被覆盖，拖拽调宽与断点收窄共用同一套变量，不会互相打架。
+- 高度使用 `100dvh`（带 `100vh` 回退），移动端浏览器地址栏收起时不会跳动；底部 Tab 栏与输入框均适配 `env(safe-area-inset-bottom)` 安全区。
+- 窗口尺寸变化时自动收敛状态：退出面板全屏、关闭抽屉，避免残留遮罩。
+- 快捷键：`Esc` 依次关闭会话抽屉 / 退出面板全屏。
+
 | 功能页 | 能力 |
 |---|---|
 | **项目** | 项目 CRUD（名称 / 描述 / 颜色），把会话加入或移出项目，点击会话直接跳转对话 |
@@ -74,9 +95,11 @@
 ├── tsconfig.json
 ├── package.json
 ├── src/                      # 前端源码（main.ts、router.ts、store.ts、workbench.ts、auth.ts、api.ts、types.ts）
+│   ├── composables/
+│   │   └── useBreakpoint.ts  # 响应式断点（matchMedia），驱动抽屉/浮层等结构切换
 │   ├── views/                # 路由页面
 │   │   ├── Login.vue         # 登录页
-│   │   ├── Shell.vue         # 应用外壳（顶部工具栏 + 左侧图标导航）
+│   │   ├── Shell.vue         # 应用外壳（顶部工具栏 + 左侧图标导航 + 窄屏抽屉）
 │   │   ├── Home.vue          # 对话页（会话列表 + 聊天 + 右侧结果面板）
 │   │   ├── Projects.vue      # 项目页
 │   │   ├── Experts.vue       # 专家 · 技能 · 连接器页
@@ -85,6 +108,7 @@
 │   │   ├── Inspiration.vue   # 灵感页
 │   │   └── Settings.vue      # 设置页
 │   └── components/           # 复用组件（ChatWindow、FilePanel、SkillManager、ToolConfirm 等）
+├── tests/                    # 自动化验证脚本（见「布局与交互验证」）
 └── static/                   # 生产构建产物（由 FastAPI 的 StaticFiles 直接托管）
 ```
 
@@ -216,6 +240,26 @@ tail -f /var/log/langgraph-agent.log  # 应用日志
 
 > **首次部署后请立刻修改 `.env` 里的 `AUTH_PASSWORD`**，并 `systemctl restart langgraph-agent` 生效。
 > 若服务器有安全组/防火墙，需放行 `8000` 端口。生产环境建议前置 Nginx 并配置 HTTPS。
+
+---
+
+## 布局与交互验证
+
+`tests/` 下提供三份无需测试框架的自动化验证脚本（依赖 `requests` / `playwright`，Chromium 已由 `playwright install chromium` 安装）：
+
+| 脚本 | 覆盖内容 |
+|---|---|
+| `tests/verify_responsive.py` | **15 档视口**（320→2560px）逐页巡检：无横向溢出、无元素越界、断点结构正确（底部 Tab 栏 / 汉堡按钮 / 三栏列宽）、顶栏控件按断点收起、控制台无错误 |
+| `tests/verify_interaction.py` | 交互可用性：手机端汉堡抽屉导航跳转、会话抽屉开关（Esc）、右面板浮层出现与关闭、**手机端真实对话往返**、平板/桌面面板收起展开与全屏 |
+| `tests/verify_api.py` | 后端回归：401 保护、登录、六域接口、runtime 字段、项目/资料 CRUD、模型切换校验、SPA 深链与路由语义（`BASE` 常量可切换本地/线上） |
+
+```bash
+python3.11 tests/verify_responsive.py    # 需先启动后端并完成 npm run build
+python3.11 tests/verify_interaction.py
+python3.11 tests/verify_api.py
+```
+
+三个脚本全部通过即视为一次完整回归（前端布局 + 交互 + 后端接口 + SPA 路由）。
 
 ---
 

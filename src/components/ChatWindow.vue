@@ -141,19 +141,20 @@ watch(() => state.current, () => { draft.value = '' })
           @keydown="onKeydown"
         />
         <div class="composer-bar">
-          <NButton quaternary circle size="small" title="添加附件">
+          <!-- 次要操作按钮：手机尺寸下由 CSS 隐藏，把宽度留给输入与发送 -->
+          <NButton class="composer-aux" quaternary circle size="small" title="添加附件">
             <template #icon><Plus :size="16" /></template>
           </NButton>
-          <NButton quaternary circle size="small" title="引用文件">
+          <NButton class="composer-aux" quaternary circle size="small" title="引用文件">
             <template #icon><Paperclip :size="16" /></template>
           </NButton>
-          <NButton quaternary circle size="small" title="联网检索">
+          <NButton class="composer-aux" quaternary circle size="small" title="联网检索">
             <template #icon><Globe :size="16" /></template>
           </NButton>
           <span class="grow"></span>
           <NSelect
+            class="composer-model"
             size="tiny"
-            style="width: 168px"
             :value="wb.runtime.model"
             :options="modelOptions"
             :consistent-menu-width="false"

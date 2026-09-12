@@ -151,11 +151,12 @@ async function onSubmit(): Promise<void> {
 
 <style scoped>
 .login-page {
-  min-height: 100vh;
+  /* 用 --app-h（dvh）而非 100vh：移动端地址栏收起时不产生多余滚动 */
+  min-height: var(--app-h);
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 24px;
+  padding: max(24px, env(safe-area-inset-top)) 24px max(24px, env(safe-area-inset-bottom));
   background: var(--bg);
   background-image:
     radial-gradient(at 20% 15%, rgba(47, 111, 235, 0.13) 0px, transparent 55%),
@@ -170,6 +171,22 @@ async function onSubmit(): Promise<void> {
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.09), 0 2px 8px rgba(0, 0, 0, 0.04);
   padding: 40px 36px 32px;
   animation: rise 0.45s cubic-bezier(0.2, 0.8, 0.25, 1);
+}
+
+/* 小屏：卡片贴边距、内边距收窄，避免输入框过窄 */
+@media (max-width: 480px) {
+  .login-page { padding-left: 16px; padding-right: 16px; }
+  .login-card { padding: 28px 20px 24px; border-radius: 14px; }
+  h1 { font-size: 19px; }
+}
+
+/* 矮视口（如笔记本横屏分屏、手机横屏）：压缩纵向留白确保按钮可见 */
+@media (max-height: 560px) {
+  .login-page { align-items: flex-start; }
+  .login-card { padding-top: 24px; padding-bottom: 20px; }
+  .logo { width: 44px; height: 44px; margin-bottom: 12px; }
+  .form { margin-top: 16px; }
+  .foot { margin-top: 16px; padding-top: 12px; }
 }
 
 @keyframes rise {

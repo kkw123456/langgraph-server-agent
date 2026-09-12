@@ -169,7 +169,7 @@ onBeforeUnmount(() => { if (timer) window.clearInterval(timer) })
             >{{ a.last_status }}</NTag>
           </div>
 
-          <div class="muted tiny" style="margin-bottom: 10px">
+          <div class="muted tiny mb-10">
             上次运行：{{ fmtTime(a.last_run_at) }}
           </div>
 
@@ -178,7 +178,7 @@ onBeforeUnmount(() => { if (timer) window.clearInterval(timer) })
               <template #icon><Play :size="13" /></template>
               立即运行
             </NButton>
-            <span style="display: inline-flex; gap: 2px">
+            <span class="btn-group">
               <NButton quaternary circle size="tiny" title="编辑" @click="openEdit(a)">
                 <template #icon><Pencil :size="13" /></template>
               </NButton>
@@ -198,10 +198,9 @@ onBeforeUnmount(() => { if (timer) window.clearInterval(timer) })
 
     <NModal v-model:show="showEdit">
       <NCard
-        class="modal-card"
+        class="modal-card modal-w-md"
         :title="editing ? '编辑自动化任务' : '新建自动化任务'"
         :bordered="false"
-        style="width: 540px; max-width: 94vw"
       >
         <NForm label-placement="top" :show-feedback="false">
           <div class="form-grid">

@@ -73,7 +73,7 @@ function cancel(): void {
 
 <template>
   <NModal :show="true" :mask-closable="false" @update:show="() => {}">
-    <NCard class="confirm-card" title="工具调用需确认" :bordered="false" style="width: 580px; max-width: 94vw">
+    <NCard class="confirm-card modal-w-lg" title="工具调用需确认" :bordered="false">
       <template #header-extra><ShieldAlert :size="18" /></template>
 
       <NAlert type="warning" :bordered="false" class="confirm-alert">

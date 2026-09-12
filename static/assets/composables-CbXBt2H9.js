@@ -1,1 +1,0 @@
-import{Yt as e,fr as t,p as n}from"./index-D8pxfoyK.js";function r(){let r=t(n,null);return r===null&&e(`use-dialog`,`No outer <n-dialog-provider /> founded.`),r}export{r as t};

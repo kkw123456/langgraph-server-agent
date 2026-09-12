@@ -43,8 +43,8 @@ onMounted(() => loadSkills())
       </div>
     </div>
 
-    <div class="page-body" style="padding-top: 0">
-      <NTabs v-model:value="tab" type="line" size="medium" style="margin-bottom: 8px">
+    <div class="page-body page-body-flush">
+      <NTabs v-model:value="tab" type="line" size="medium" class="experts-tabs">
         <NTabPane name="skills">
           <template #tab><span class="tab-label"><Puzzle :size="15" /> 技能</span></template>
         </NTabPane>
@@ -76,7 +76,7 @@ onMounted(() => loadSkills())
               {{ c.ready ? '已就绪' : '未接入' }}
             </NTag>
           </div>
-          <p class="card-desc" style="min-height: 0">{{ c.desc }}</p>
+          <p class="card-desc card-desc-flat">{{ c.desc }}</p>
         </NCard>
         <NEmpty v-if="!CONNECTORS.length" class="page-empty" description="暂无连接器" />
       </div>

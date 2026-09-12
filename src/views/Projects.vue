@@ -158,14 +158,14 @@ onBeforeUnmount(() => stopBusy && stopBusy())
               </NButton>
             </div>
           </div>
-          <p v-else class="muted tiny" style="margin-bottom: 8px">尚未关联任何会话</p>
+          <p v-else class="muted tiny mb-8">尚未关联任何会话</p>
 
           <div class="pc-foot">
             <NButton size="tiny" @click="openAdd(p)">
               <template #icon><Plus :size="13" /></template>
               加入会话
             </NButton>
-            <span style="display: inline-flex; gap: 2px">
+            <span class="btn-group">
               <NButton quaternary circle size="tiny" title="编辑" @click="openRename(p)">
                 <template #icon><Pencil :size="13" /></template>
               </NButton>
@@ -186,10 +186,9 @@ onBeforeUnmount(() => stopBusy && stopBusy())
     <!-- 新建 / 编辑项目 -->
     <NModal v-model:show="showEdit">
       <NCard
-        class="modal-card"
+        class="modal-card modal-w-sm"
         :title="editing ? '编辑项目' : '新建项目'"
         :bordered="false"
-        style="width: 460px; max-width: 94vw"
       >
         <NForm label-placement="top" :show-feedback="false">
           <div class="form-grid">
@@ -215,7 +214,7 @@ onBeforeUnmount(() => stopBusy && stopBusy())
 
     <!-- 把会话加入项目 -->
     <NModal v-model:show="showAdd">
-      <NCard class="modal-card" title="加入会话" :bordered="false" style="width: 460px; max-width: 94vw">
+      <NCard class="modal-card modal-w-sm" title="加入会话" :bordered="false">
         <NForm label-placement="top" :show-feedback="false">
           <NFormItem label="选择未归类的会话">
             <NSelect
@@ -229,8 +228,8 @@ onBeforeUnmount(() => stopBusy && stopBusy())
         <NEmpty
           v-if="!unassigned.length"
           size="small"
+          class="mt-8"
           description="没有可加入的会话，先回到对话页新建一个"
-          style="margin-top: 8px"
         />
         <template #footer>
           <div class="modal-actions">

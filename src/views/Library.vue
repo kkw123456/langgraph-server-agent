@@ -136,14 +136,14 @@ onMounted(() => loadLibrary())
           </div>
 
           <pre v-if="it.content" class="lb-content">{{ it.content }}</pre>
-          <p v-else class="muted tiny" style="margin-bottom: 8px">（无内容）</p>
+          <p v-else class="muted tiny mb-8">（无内容）</p>
 
           <div class="lb-foot">
             <span class="lb-tags">
               <NTag v-for="t in tagList(it.tags)" :key="t" size="tiny" :bordered="false">{{ t }}</NTag>
               <span v-if="!tagList(it.tags).length" class="muted tiny">无标签</span>
             </span>
-            <span style="display: inline-flex; gap: 4px">
+            <span class="btn-group gap-4">
               <NButton size="tiny" @click="sendToChat(it)">
                 <template #icon><Send :size="13" /></template>
                 带进对话
@@ -167,10 +167,9 @@ onMounted(() => loadLibrary())
 
     <NModal v-model:show="showEdit">
       <NCard
-        class="modal-card"
+        class="modal-card modal-w-md"
         :title="editing ? '编辑条目' : '新建条目'"
         :bordered="false"
-        style="width: 560px; max-width: 94vw"
       >
         <NForm label-placement="top" :show-feedback="false">
           <div class="form-grid">

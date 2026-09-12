@@ -25,7 +25,7 @@ function submit(): void {
 
 <template>
   <NModal :show="open" @update:show="emit('close')">
-    <NCard class="modal-card" title="新建自定义技能" :bordered="false" size="medium" style="width: 560px; max-width: 94vw">
+    <NCard class="modal-card modal-w-md" title="新建自定义技能" :bordered="false" size="medium">
       <NForm label-placement="top" :show-feedback="false">
         <NFormItem label="名称">
           <NInput v-model:value="form.name" placeholder="我的技能" />

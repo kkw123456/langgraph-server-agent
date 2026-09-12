@@ -102,14 +102,14 @@ async function useIdea(i: Idea): Promise<void> {
         <span class="muted count">{{ shown.length }} 个模板</span>
       </div>
       <div class="page-actions">
-        <NInput v-model:value="kw" style="width: 240px" placeholder="搜索模板…" clearable>
+        <NInput v-model:value="kw" class="idea-search" placeholder="搜索模板…" clearable>
           <template #prefix><Search :size="14" /></template>
         </NInput>
       </div>
     </div>
 
     <div class="page-body">
-      <div class="scene-tabs" style="justify-content: flex-start; margin-bottom: 16px">
+      <div class="scene-tabs idea-cats">
         <span
           v-for="c in cats"
           :key="c"
@@ -130,7 +130,7 @@ async function useIdea(i: Idea): Promise<void> {
             </div>
             <NTag size="small" :bordered="false">{{ i.cat }}</NTag>
           </div>
-          <p class="card-desc" style="min-height: 0">{{ i.desc }}</p>
+          <p class="card-desc card-desc-flat">{{ i.desc }}</p>
           <div class="card-foot">
             <span class="muted tiny">点击直接带进对话</span>
             <NButton size="tiny" type="primary" @click="useIdea(i)">
