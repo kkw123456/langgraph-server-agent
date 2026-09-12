@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { NInput, NTag, NCard, NSwitch, NButton, NEmpty, NIcon } from 'naive-ui'
 import { Puzzle, RefreshCw, Plus, Trash2, Search, Package } from 'lucide-vue-next'
 import type { Skill } from '../types'
 
@@ -59,57 +60,77 @@ const enabledCount = computed(() => props.skills.filter((s) => s.enabled).length
         <span class="muted sm-count">{{ enabledCount }} / {{ skills.length }} 已启用</span>
       </div>
       <div class="sm-actions">
-        <div class="search">
-          <Search :size="14" />
-          <input v-model="keyword" placeholder="搜索技能 / 工具…" />
-        </div>
-        <button class="ghost" @click="$emit('reload')"><RefreshCw :size="15" /> 重载</button>
-        <button class="primary" @click="$emit('add')"><Plus :size="15" /> 新建技能</button>
+        <NInput v-model:value="keyword" class="sm-search" placeholder="搜索技能 / 工具…" clearable>
+          <template #prefix><NIcon :component="Search" /></template>
+        </NInput>
+        <NButton @click="$emit('reload')">
+          <template #icon><RefreshCw :size="15" /></template>
+          重载
+        </NButton>
+        <NButton type="primary" @click="$emit('add')">
+          <template #icon><Plus :size="15" /></template>
+          新建技能
+        </NButton>
       </div>
     </div>
 
     <div class="sm-cats">
-      <button
+      <NTag
         v-for="c in categories"
         :key="c"
         class="cat-chip"
-        :class="{ active: activeCat === c }"
-        @click="activeCat = c"
-      >{{ c }}</button>
+        :type="activeCat === c ? 'primary' : 'default'"
+        :bordered="false"
+        checkable
+        :checked="activeCat === c"
+        @update:checked="activeCat = c"
+      >{{ c }}</NTag>
     </div>
 
     <div class="sm-body">
+      <NEmpty v-if="!shown.length" class="sm-empty" description="没有匹配的技能" />
       <section v-for="g in shown" :key="g.category" class="sm-group">
         <h4 class="group-title">{{ g.category }} <span class="muted">· {{ g.list.length }}</span></h4>
         <div class="sm-grid">
-          <article class="card" v-for="s in g.list" :key="s.id" :class="{ off: !s.enabled }">
+          <NCard v-for="s in g.list" :key="s.id" class="skill-card" :class="{ off: !s.enabled }" size="small">
             <div class="card-head">
               <div class="card-name">
                 <Package :size="15" />
                 <b>{{ s.name }}</b>
-                <span v-if="s.builtin" class="badge">内置</span>
-                <span v-else class="badge custom">自定义</span>
+                <NTag size="small" :bordered="false" :type="s.builtin ? 'default' : 'info'">
+                  {{ s.builtin ? '内置' : '自定义' }}
+                </NTag>
               </div>
-              <label class="switch" :title="s.enabled ? '点击禁用' : '点击启用'">
-                <input type="checkbox" :checked="s.enabled" @change="$emit('toggle', s)" />
-                <span class="slider"></span>
-              </label>
+              <NSwitch
+                :value="s.enabled"
+                size="small"
+                @update:value="$emit('toggle', s)"
+              />
             </div>
             <p class="card-desc">{{ s.description || '（无描述）' }}</p>
             <div class="card-tools">
-              <span v-for="t in (s.tools || [])" :key="t" class="tool-chip">{{ t }}</span>
+              <NTag v-for="t in (s.tools || [])" :key="t" size="small" :bordered="false" class="tool-chip">
+                {{ t }}
+              </NTag>
               <span v-if="!s.tools || !s.tools.length" class="muted tiny">无工具</span>
             </div>
             <div class="card-foot">
               <span class="state" :class="s.enabled ? 'on' : 'off'">{{ s.enabled ? '已启用' : '已禁用' }}</span>
-              <button v-if="!s.builtin" class="icon-btn danger" title="删除技能" @click="$emit('remove', s.id)">
-                <Trash2 :size="14" />
-              </button>
+              <NButton
+                v-if="!s.builtin"
+                quaternary
+                circle
+                size="tiny"
+                title="删除技能"
+                type="error"
+                @click="$emit('remove', s.id)"
+              >
+                <template #icon><Trash2 :size="14" /></template>
+              </NButton>
             </div>
-          </article>
+          </NCard>
         </div>
       </section>
-      <div v-if="!shown.length" class="sm-empty muted">没有匹配的技能。</div>
     </div>
   </div>
 </template>

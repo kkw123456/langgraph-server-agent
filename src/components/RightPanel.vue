@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
+import { NTabs, NTabPane, NButton, NEmpty, NScrollbar } from 'naive-ui'
 import {
-  FolderClosed, Eye, PanelRightClose, PanelRightOpen, Maximize2, Minimize2, File, Download,
+  FolderClosed, Eye, PanelRightClose, PanelRightOpen, Maximize2, Minimize2, Download,
 } from 'lucide-vue-next'
 import { state } from '../store'
 import { api } from '../api'
@@ -60,60 +61,70 @@ defineExpose({ openPreview })
 
     <!-- 收起态：仅剩图标竖条 -->
     <div v-if="panelState === 'icons'" class="rail">
-      <button class="rail-btn" title="展开文件面板" @click="emit('expand')">
-        <FolderClosed :size="18" />
-      </button>
-      <button class="rail-btn" title="展开预览面板" @click="openPreview(); emit('expand')">
-        <Eye :size="18" />
-      </button>
-      <button class="rail-btn" title="完全展开" @click="emit('expand')">
-        <PanelRightOpen :size="18" />
-      </button>
+      <NButton quaternary circle title="展开文件面板" @click="emit('expand')">
+        <template #icon><FolderClosed :size="18" /></template>
+      </NButton>
+      <NButton quaternary circle title="展开预览面板" @click="openPreview(); emit('expand')">
+        <template #icon><Eye :size="18" /></template>
+      </NButton>
+      <NButton quaternary circle title="完全展开" @click="emit('expand')">
+        <template #icon><PanelRightOpen :size="18" /></template>
+      </NButton>
     </div>
 
     <template v-else>
-      <div class="tabs">
-        <button :class="{ active: tab === 'files' }" @click="tab = 'files'">
-          <FolderClosed :size="15" /> 文件
-        </button>
-        <button :class="{ active: tab === 'preview' }" @click="tab = 'preview'">
-          <Eye :size="15" /> 预览
-        </button>
-        <div class="tabs-spacer"></div>
-        <button class="iconbtn" :title="fullscreen ? '退出全屏' : '全屏'" @click="fullscreen = !fullscreen">
-          <component :is="fullscreen ? Minimize2 : Maximize2" :size="15" />
-        </button>
-        <button class="iconbtn" title="收起到图标" @click="emit('toggleIcons')">
-          <Minimize2 :size="15" class="rot" />
-        </button>
-        <button class="iconbtn" title="收起面板" @click="emit('collapse')">
-          <PanelRightClose :size="15" />
-        </button>
+      <div class="panel-tabs">
+        <NTabs
+          :value="tab"
+          type="line"
+          size="small"
+          class="rp-tabs"
+          @update:value="(v: string) => (tab = v as 'files' | 'preview')"
+        >
+          <NTabPane name="files">
+            <template #tab><span class="tab-label"><FolderClosed :size="15" /> 文件</span></template>
+          </NTabPane>
+          <NTabPane name="preview">
+            <template #tab><span class="tab-label"><Eye :size="15" /> 预览</span></template>
+          </NTabPane>
+        </NTabs>
+        <div class="rp-actions">
+          <NButton quaternary circle size="small" :title="fullscreen ? '退出全屏' : '全屏'" @click="fullscreen = !fullscreen">
+            <template #icon>
+              <component :is="fullscreen ? Minimize2 : Maximize2" :size="15" />
+            </template>
+          </NButton>
+          <NButton quaternary circle size="small" title="收起到图标" @click="emit('toggleIcons')">
+            <template #icon><PanelRightOpen :size="15" /></template>
+          </NButton>
+          <NButton quaternary circle size="small" title="收起面板" @click="emit('collapse')">
+            <template #icon><PanelRightClose :size="15" /></template>
+          </NButton>
+        </div>
       </div>
 
-      <!-- 文件 / 预览：FilePanel 常驻，preview 标签显示其选中文件 -->
       <FilePanel
         ref="fileRef"
         v-show="tab === 'files'"
         @preview="previewActive = true; tab = 'preview'"
       />
+
       <div v-show="tab === 'preview'" class="preview-pane">
         <template v-if="selected">
           <div class="file-view-head">
             <span class="file-name">{{ selected.name }}</span>
             <span class="muted">{{ fmtSize(selected.size) }}</span>
-            <a class="iconbtn" :href="downloadUrl(selected.path)" target="_blank" rel="noopener" title="下载">
-              <Download :size="14" />
-            </a>
+            <NButton quaternary circle size="tiny" tag="a" :href="downloadUrl(selected.path)" target="_blank" title="下载">
+              <template #icon><Download :size="14" /></template>
+            </NButton>
           </div>
           <div v-if="selected.binary" class="file-hint muted">{{ selected.note || '二进制文件，无法直接预览，请下载。' }}</div>
           <div v-else-if="selected.truncated" class="file-hint muted">{{ selected.note || '文件过大，仅显示部分内容。' }}</div>
-          <pre v-else class="file-content">{{ selected.content }}</pre>
+          <NScrollbar v-else class="preview-scroll">
+            <pre class="file-content">{{ selected.content }}</pre>
+          </NScrollbar>
         </template>
-        <div v-else class="preview-empty muted">
-          <File :size="28" />
-          <p>在「文件」标签中点击一个文本文件即可在此预览。</p>
-        </div>
+        <NEmpty v-else class="preview-empty" description="在「文件」标签中点击一个文本文件即可在此预览" />
       </div>
     </template>
   </aside>

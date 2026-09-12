@@ -19,6 +19,7 @@
 - **三区布局 + 可收起/全屏面板**：左侧会话栏（顶部「新建对话」）、中间主区（顶部菜单：对话 / 技能管理）、右侧文件与预览面板。右侧面板支持 **拖拽调宽、收起到图标条、完全收起、全屏** 四种状态。
 - **独立技能管理页**：顶部菜单「技能管理」进入专门页面，支持关键词搜索、分类筛选、卡片式展示（开关启停 / 删除自定义 / 重载 / 新建）。
 - **现代化图标**：全站图标统一使用主流图标库 [lucide](https://lucide.dev/)（`lucide-vue-next`），并采用亮色主题与流式「打字机」光标效果。
+- **Naive UI 组件库**：界面基于 [Naive UI](https://www.naiveui.com/)（`naive-ui`）构建——按钮、输入框、弹窗、开关、标签页、卡片、列表、消息提示等均使用其组件，配合 `n-config-provider` 统一亮色主题与中文语言包。
 
 ---
 
@@ -28,7 +29,7 @@
 |---|---|
 | 后端 | Python 3.11、FastAPI、Uvicorn、LangGraph 1.x、`langgraph-checkpoint-sqlite`（AsyncSqliteSaver）、`langchain-openai`（OpenAI 兼容） |
 | 模型 | 任意 OpenAI 兼容接口：OpenAI / DeepSeek / Moonshot / 本地 Ollama 等 |
-| 前端 | Vue 3.5、Vite 8、TypeScript、`vue-tsc` 类型检查 |
+| 前端 | Vue 3.5、Vite 8、TypeScript、`vue-tsc` 类型检查、Naive UI 组件库、lucide 图标 |
 | 通信 | REST（`/api/*`）+ WebSocket（`/ws/{cid}`） |
 
 ---

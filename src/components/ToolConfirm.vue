@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { reactive, ref } from 'vue'
+import { NModal, NCard, NSwitch, NInput, NButton, NAlert, NTag } from 'naive-ui'
 import { ShieldAlert, Wrench } from 'lucide-vue-next'
-import { state, resolveTool } from '../store'
+import { resolveTool } from '../store'
 import type { PendingToolCall } from '../types'
 
 const props = defineProps<{ calls: PendingToolCall[] }>()
@@ -71,37 +72,46 @@ function cancel(): void {
 </script>
 
 <template>
-  <div class="modal">
-    <div class="modal-box confirm-box">
-      <h3><ShieldAlert :size="18" /> 工具调用需确认</h3>
-      <p class="confirm-hint">当前为「确认模式」，下列工具将在你批准后执行。可逐条允许/拒绝，或编辑参数。</p>
+  <NModal :show="true" :mask-closable="false" @update:show="() => {}">
+    <NCard class="confirm-card" title="工具调用需确认" :bordered="false" style="width: 580px; max-width: 94vw">
+      <template #header-extra><ShieldAlert :size="18" /></template>
+
+      <NAlert type="warning" :bordered="false" class="confirm-alert">
+        当前为「确认模式」，下列工具将在你批准后执行。可逐条允许/拒绝，或编辑参数。
+      </NAlert>
 
       <div class="confirm-list">
         <div class="confirm-row" v-for="r in rows" :key="r.id">
           <div class="confirm-head">
             <span class="confirm-name"><Wrench :size="13" /> {{ r.name }}</span>
-            <label class="switch">
-              <input type="checkbox" v-model="r.allow" />
-              <span class="switch-label">{{ r.allow ? '允许' : '拒绝' }}</span>
-            </label>
+            <span class="confirm-switch">
+              <NTag :type="r.allow ? 'success' : 'error'" size="small" :bordered="false">
+                {{ r.allow ? '允许' : '拒绝' }}
+              </NTag>
+              <NSwitch v-model:value="r.allow" size="small" />
+            </span>
           </div>
-          <textarea
+          <NInput
             v-if="r.allow"
-            v-model="r.argsStr"
-            class="args"
+            v-model:value="r.argsStr"
+            type="textarea"
+            :autosize="{ minRows: 3, maxRows: 8 }"
             spellcheck="false"
             placeholder="{}"
-          ></textarea>
+            class="args-input"
+          />
           <div v-if="r.error" class="args-err">{{ r.error }}</div>
         </div>
       </div>
 
-      <div class="modal-actions">
-        <button class="ghost" @click="denyAll">全部拒绝</button>
-        <button class="ghost" @click="allowAll">全部允许</button>
-        <button class="ghost" @click="cancel">取消本轮</button>
-        <button class="primary" :disabled="submitting" @click="submit">确认执行</button>
-      </div>
-    </div>
-  </div>
+      <template #footer>
+        <div class="modal-actions">
+          <NButton @click="denyAll">全部拒绝</NButton>
+          <NButton @click="allowAll">全部允许</NButton>
+          <NButton @click="cancel">取消本轮</NButton>
+          <NButton type="primary" :disabled="submitting" @click="submit">确认执行</NButton>
+        </div>
+      </template>
+    </NCard>
+  </NModal>
 </template>

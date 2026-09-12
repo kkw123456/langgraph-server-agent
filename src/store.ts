@@ -1,5 +1,6 @@
 import { reactive } from 'vue'
 import { api } from './api'
+import { message as toast } from './main'
 import type { Conversation, Message, Skill, WsEvent, CreateSkillPayload, ToolMode, PendingToolCall } from './types'
 
 interface AppState {
@@ -12,7 +13,6 @@ interface AppState {
   live: Message | null
   mode: ToolMode            // 工具调用权限模式
   pendingTool: PendingToolCall[] | null  // 待用户审批的工具调用（确认模式）
-  warn: string             // 瞬时提示（如「上一轮尚未结束」）
 }
 
 // 轻量级全局 store：单一响应式 state + 动作函数。
@@ -27,7 +27,6 @@ export const state = reactive<AppState>({
   live: null, // 正在流式输出的助手消息
   mode: 'auto',
   pendingTool: null,
-  warn: '',
 })
 
 let ws: WebSocket | null = null
@@ -89,8 +88,7 @@ function handleEvent(msg: WsEvent): void {
       state.mode = msg.mode
       break
     case 'warn':
-      state.warn = msg.content
-      window.setTimeout(() => { if (state.warn === msg.content) state.warn = '' }, 3000)
+      toast.warning(msg.content)
       break
   }
 }
@@ -105,7 +103,6 @@ export async function selectConv(id: string): Promise<void> {
   state.current = id
   state.live = null
   state.pendingTool = null
-  state.warn = ''
   const d = await api.get<{ meta?: Conversation; messages?: Message[] }>(`/api/conversations/${id}`)
   state.convTitle = d.meta ? d.meta.title : '未选择会话'
   state.messages = d.messages ?? []
@@ -118,7 +115,6 @@ export async function newChat(): Promise<void> {
   state.current = null
   state.live = null
   state.pendingTool = null
-  state.warn = ''
   state.messages = []
   state.convTitle = '新对话'
   await loadConvs()

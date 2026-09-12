@@ -1,15 +1,16 @@
 <script setup lang="ts">
 import { ref, watch, nextTick, computed } from 'vue'
-import { Send, Sparkles, Loader2, Square } from 'lucide-vue-next'
+import { NInput, NButton } from 'naive-ui'
+import { Send, Sparkles, Loader2 } from 'lucide-vue-next'
 import { state } from '../store'
 import MessageBubble from './MessageBubble.vue'
 
 const emit = defineEmits<{ send: [text: string] }>()
 const draft = ref('')
 const box = ref<HTMLElement | null>(null)
-const input = ref<HTMLTextAreaElement | null>(null)
+const inputRef = ref<InstanceType<typeof NInput> | null>(null)
 
-// 会话是否处于「进行中」：有流式消息或用户已发出但尚回复
+// 会话是否处于「进行中」：有流式消息
 const streaming = computed(() => !!state.live)
 const empty = computed(() => !state.messages.length && !state.live)
 
@@ -18,17 +19,9 @@ function submit(): void {
   if (!t.trim()) return
   emit('send', t)
   draft.value = ''
-  nextTick(() => autoGrow())
 }
 
-function autoGrow(): void {
-  const el = input.value
-  if (!el) return
-  el.style.height = 'auto'
-  el.style.height = Math.min(180, el.scrollHeight) + 'px'
-}
-
-function onKey(e: KeyboardEvent): void {
+function onKeydown(e: KeyboardEvent): void {
   if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
     e.preventDefault()
     submit()
@@ -49,7 +42,7 @@ const suggestions = [
 
 function useSuggestion(s: string): void {
   draft.value = s
-  nextTick(() => { autoGrow(); input.value?.focus() })
+  nextTick(() => inputRef.value?.focus())
 }
 
 // 历史消息或流式 live 消息变化均自动滚动到底部
@@ -57,51 +50,63 @@ watch(
   () => [state.messages.length, state.live?.content, state.live?.tool_calls?.length],
   async () => { await nextTick(); scrollBottom() },
 )
-watch(() => state.current, () => { draft.value = ''; nextTick(() => autoGrow()) })
+watch(() => state.current, () => { draft.value = '' })
 </script>
 
 <template>
   <div class="chat-view">
-  <section class="messages" ref="box">
-    <!-- 空状态：Hero -->
-    <div v-if="empty" class="hero">
-      <div class="hero-logo"><Sparkles :size="34" /></div>
-      <h2>有什么可以帮你的？</h2>
-      <p class="muted">基于 LangGraph 的服务端智能体，支持工具调用、技能扩展与会话隔离工作目录。</p>
-      <div class="suggestions">
-        <button v-for="s in suggestions" :key="s" class="suggestion" @click="useSuggestion(s)">
-          {{ s }}
-        </button>
+    <section class="messages" ref="box">
+      <!-- 空状态：Hero -->
+      <div v-if="empty" class="hero">
+        <div class="hero-logo"><Sparkles :size="34" /></div>
+        <h2>有什么可以帮你的？</h2>
+        <p class="muted">基于 LangGraph 的服务端智能体，支持工具调用、技能扩展与会话隔离工作目录。</p>
+        <div class="suggestions">
+          <NButton
+            v-for="s in suggestions"
+            :key="s"
+            class="suggestion"
+            quaternary
+            @click="useSuggestion(s)"
+          >{{ s }}</NButton>
+        </div>
       </div>
-    </div>
 
-    <template v-else>
-      <MessageBubble v-for="(m, i) in state.messages" :key="'h' + i" :msg="m" />
-      <MessageBubble v-if="state.live" :msg="state.live" streaming />
-    </template>
-  </section>
+      <template v-else>
+        <MessageBubble v-for="(m, i) in state.messages" :key="'h' + i" :msg="m" />
+        <MessageBubble v-if="state.live" :msg="state.live" streaming />
+      </template>
+    </section>
 
-  <footer class="composer">
-    <div class="composer-inner">
-      <textarea
-        ref="input"
-        class="input"
-        v-model="draft"
-        rows="1"
-        @input="autoGrow"
-        @keydown="onKey"
-        placeholder="给智能体发送消息…（Enter 发送，Shift+Enter 换行）"
-      ></textarea>
-      <button class="send-btn" :disabled="!draft.trim()" @click="submit" title="发送">
-        <component :is="streaming ? Square : Send" :size="17" />
-      </button>
-    </div>
-    <div class="composer-foot">
-      <span class="muted tiny">
-        <component :is="streaming ? Loader2 : Sparkles" :size="12" class="spin-none" />
-        {{ streaming ? '智能体正在回复…' : '智能体可能会调用工具，请留意确认提示' }}
-      </span>
-    </div>
-  </footer>
+    <footer class="composer">
+      <div class="composer-inner">
+        <NInput
+          ref="inputRef"
+          v-model:value="draft"
+          type="textarea"
+          :autosize="{ minRows: 1, maxRows: 8 }"
+          placeholder="给智能体发送消息…（Enter 发送，Shift+Enter 换行）"
+          :bordered="false"
+          class="composer-input"
+          @keydown="onKeydown"
+        />
+        <NButton
+          class="send-btn"
+          type="primary"
+          circle
+          :disabled="!draft.trim()"
+          title="发送"
+          @click="submit"
+        >
+          <template #icon><Send :size="17" /></template>
+        </NButton>
+      </div>
+      <div class="composer-foot">
+        <span class="muted tiny">
+          <component :is="streaming ? Loader2 : Sparkles" :size="12" />
+          {{ streaming ? '智能体正在回复…' : '智能体可能会调用工具，请留意确认提示' }}
+        </span>
+      </div>
+    </footer>
   </div>
 </template>

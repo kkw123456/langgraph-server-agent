@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
-import { ArrowUp, RotateCw, Download, FileText, FolderClosed, Package, FolderOpen, ArrowLeft } from 'lucide-vue-next'
+import { NButton, NEmpty, NScrollbar, NAlert } from 'naive-ui'
+import { ArrowUp, RotateCw, Download, FileText, FolderClosed, Package, ArrowLeft } from 'lucide-vue-next'
 import { state } from '../store'
 import type { FileEntry, FileResponse, FileContentResponse } from '../types'
 import { api } from '../api'
@@ -96,43 +97,55 @@ watch(cid, () => { curPath.value = ''; selected.value = null; load('') }, { imme
 <template>
   <div class="file-panel">
     <div class="file-toolbar">
-      <button class="iconbtn" title="返回上级" @click="goUp" :disabled="!curPath"><ArrowUp :size="15" /></button>
+      <NButton quaternary circle size="small" title="返回上级" :disabled="!curPath" @click="goUp">
+        <template #icon><ArrowUp :size="15" /></template>
+      </NButton>
       <span class="file-path">
-        <FolderOpen :size="14" /> {{ curPath || '/' }}
+        <FolderClosed :size="14" /> {{ curPath || '/' }}
         <span v-if="loading" class="muted">…</span>
       </span>
-      <button class="iconbtn" title="刷新" @click="refresh"><RotateCw :size="15" /></button>
+      <NButton quaternary circle size="small" title="刷新" @click="refresh">
+        <template #icon><RotateCw :size="15" /></template>
+      </NButton>
     </div>
 
-    <div v-if="!cid" class="file-hint muted">请先在左侧选择或新建一个会话，每个会话拥有独立隔离的工作目录。</div>
-    <div v-else-if="error" class="file-hint err">⚠ {{ error }}</div>
+    <NAlert v-if="!cid" type="default" :bordered="false" class="file-hint">
+      请先在左侧选择或新建一个会话，每个会话拥有独立隔离的工作目录。
+    </NAlert>
+    <NAlert v-else-if="error" type="error" :bordered="false" class="file-hint">{{ error }}</NAlert>
 
     <!-- 文件内容预览（内联） -->
     <div v-else-if="selected" class="file-view">
       <div class="file-view-head">
         <span class="file-name"><FileText :size="14" /> {{ selected.name }}</span>
         <span class="muted">{{ fmtSize(selected.size) }}</span>
-        <a class="iconbtn" :href="downloadUrl(selected.path)" target="_blank" rel="noopener" title="下载">
-          <Download :size="14" />
-        </a>
-        <button class="iconbtn" title="返回列表" @click="closeView"><ArrowLeft :size="14" /></button>
+        <NButton quaternary circle size="tiny" tag="a" :href="downloadUrl(selected.path)" target="_blank" title="下载">
+          <template #icon><Download :size="14" /></template>
+        </NButton>
+        <NButton quaternary circle size="tiny" title="返回列表" @click="closeView">
+          <template #icon><ArrowLeft :size="14" /></template>
+        </NButton>
       </div>
       <div v-if="selected.binary" class="file-hint muted">{{ selected.note || '二进制文件，无法直接预览，请下载。' }}</div>
       <div v-else-if="selected.truncated" class="file-hint muted">{{ selected.note || '文件过大，仅显示部分内容。' }}</div>
-      <pre v-else class="file-content">{{ selected.content }}</pre>
+      <NScrollbar v-else class="file-scroll">
+        <pre class="file-content">{{ selected.content }}</pre>
+      </NScrollbar>
     </div>
 
     <!-- 目录列表 -->
-    <ul v-else class="file-list">
-      <li v-for="e in entries" :key="e.name" class="file-item" :class="e.type" @click="openEntry(e)">
-        <span class="fi-icon">
-          <component :is="e.type === 'dir' ? FolderClosed : (e.is_text ? FileText : Package)" :size="15" />
-        </span>
-        <span class="fi-name">{{ e.name }}</span>
-        <span class="fi-meta muted">{{ e.type === 'dir' ? '' : fmtSize(e.size) }}</span>
-        <span class="fi-meta muted">{{ fmtTime(e.mtime) }}</span>
-      </li>
-      <li v-if="!entries.length" class="file-hint muted">（空目录）脚本执行的产物会落在当前会话的工作目录中。</li>
-    </ul>
+    <NScrollbar v-else class="file-list-scroll">
+      <ul class="file-list">
+        <li v-for="e in entries" :key="e.name" class="file-item" :class="e.type" @click="openEntry(e)">
+          <span class="fi-icon">
+            <component :is="e.type === 'dir' ? FolderClosed : (e.is_text ? FileText : Package)" :size="15" />
+          </span>
+          <span class="fi-name">{{ e.name }}</span>
+          <span class="fi-meta muted">{{ e.type === 'dir' ? '' : fmtSize(e.size) }}</span>
+          <span class="fi-meta muted">{{ fmtTime(e.mtime) }}</span>
+        </li>
+      </ul>
+      <NEmpty v-if="!entries.length" class="file-hint" size="small" description="空目录" />
+    </NScrollbar>
   </div>
 </template>

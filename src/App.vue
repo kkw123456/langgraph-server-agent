@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
-import { MessageSquare, Puzzle, Settings, ChevronsRight, ChevronsLeft, FolderClosed, Eye } from 'lucide-vue-next'
+import { NButton, NRadioGroup, NRadioButton, NTabs, NTabPane, useMessage } from 'naive-ui'
+import { MessageSquare, Puzzle, ChevronsRight, ChevronsLeft } from 'lucide-vue-next'
 import {
   state, loadConvs, loadSkills, selectConv, newChat, deleteConv,
   sendText, toggleSkill, removeSkill, reloadSkills, createSkill, setMode, resolveTool,
@@ -13,6 +14,7 @@ import SkillModal from './components/SkillModal.vue'
 import RightPanel from './components/RightPanel.vue'
 import ToolConfirm from './components/ToolConfirm.vue'
 
+const message = useMessage()
 const view = ref<'chat' | 'skills'>('chat')
 const showModal = ref(false)
 
@@ -58,58 +60,91 @@ onBeforeUnmount(() => { document.body.style.userSelect = '' })
 
 async function onSubmit(payload: CreateSkillPayload): Promise<void> {
   const r = await createSkill(payload)
-  if (r.ok) showModal.value = false
-  else alert('创建失败: ' + (r.error || '未知错误'))
+  if (r.ok) {
+    showModal.value = false
+    message.success('技能创建成功')
+  } else {
+    message.error('创建失败: ' + (r.error || '未知错误'))
+  }
+}
+
+function onDeleteConv(id: string): void {
+  deleteConv(id).then(() => message.success('会话已删除'))
 }
 </script>
 
 <template>
   <div class="app-shell" :style="{ gridTemplateColumns: gridTemplate }" :class="{ resizing }">
-    <!-- 左侧：会话列表（顶部为「新建对话」） -->
     <aside class="sidebar">
       <div class="sidebar-head">
-        <button class="new-chat" @click="newChat">
-          <MessageSquare :size="16" /> 新建对话
-        </button>
+        <NButton type="primary" block @click="newChat">
+          <template #icon><MessageSquare :size="16" /></template>
+          新建对话
+        </NButton>
       </div>
       <ConversationList
         :convs="state.convs"
         :current="state.current"
         @select="selectConv"
-        @delete="deleteConv"
+        @delete="onDeleteConv"
       />
       <div class="sidebar-foot">
-        <button
-          class="tab-btn"
-          :class="{ active: view === 'skills' }"
+        <NButton
+          class="skill-entry"
+          :type="view === 'skills' ? 'primary' : 'default'"
+          :quaternary="view !== 'skills'"
+          block
           @click="view = 'skills'"
         >
-          <Puzzle :size="16" /> 技能管理
-        </button>
+          <template #icon><Puzzle :size="16" /></template>
+          技能管理
+        </NButton>
       </div>
     </aside>
 
     <!-- 中间：顶栏 + 主区域（聊天 / 技能管理页） -->
     <section class="main">
       <header class="topbar">
-        <nav class="menu">
-          <button class="menu-item" :class="{ active: view === 'chat' }" @click="view = 'chat'">
-            <MessageSquare :size="16" /> 对话
-          </button>
-          <button class="menu-item" :class="{ active: view === 'skills' }" @click="view = 'skills'">
-            <Puzzle :size="16" /> 技能管理
-          </button>
-        </nav>
+        <NTabs
+          class="view-tabs"
+          :value="view"
+          type="line"
+          size="large"
+          @update:value="(v: string) => (view = v as 'chat' | 'skills')"
+        >
+          <NTabPane name="chat">
+            <template #tab>
+              <span class="tab-label"><MessageSquare :size="16" /> 对话</span>
+            </template>
+          </NTabPane>
+          <NTabPane name="skills">
+            <template #tab>
+              <span class="tab-label"><Puzzle :size="16" /> 技能管理</span>
+            </template>
+          </NTabPane>
+        </NTabs>
+
         <div class="topbar-right">
-          <span v-if="state.warn" class="warn-badge">{{ state.warn }}</span>
-          <div class="mode-toggle" title="工具调用权限模式">
-            <button :class="{ on: state.mode === 'auto' }" @click="setMode('auto')">自动</button>
-            <button :class="{ on: state.mode === 'confirm' }" @click="setMode('confirm')">确认</button>
-          </div>
+          <NRadioGroup
+            :value="state.mode"
+            size="small"
+            @update:value="(v: string) => setMode(v as 'auto' | 'confirm')"
+          >
+            <NRadioButton value="auto">自动</NRadioButton>
+            <NRadioButton value="confirm">确认</NRadioButton>
+          </NRadioGroup>
           <span class="status" :class="{ on: state.status.includes('●') }">{{ state.status }}</span>
-          <button class="ghost icon-btn" :title="panelState === 'collapsed' ? '展开右侧面板' : '收起右侧面板'" @click="togglePanel">
-            <component :is="panelState === 'collapsed' ? ChevronsLeft : ChevronsRight" :size="16" />
-          </button>
+          <NButton
+            quaternary
+            circle
+            size="small"
+            :title="panelState === 'collapsed' ? '展开右侧面板' : '收起右侧面板'"
+            @click="togglePanel"
+          >
+            <template #icon>
+              <component :is="panelState === 'collapsed' ? ChevronsLeft : ChevronsRight" :size="16" />
+            </template>
+          </NButton>
         </div>
       </header>
 
@@ -133,8 +168,8 @@ async function onSubmit(payload: CreateSkillPayload): Promise<void> {
       @toggle-icons="panelState = panelState === 'icons' ? 'full' : 'icons'"
       @resize-start="startResize"
     />
-  </div>
 
-  <SkillModal :open="showModal" @close="showModal = false" @submit="onSubmit" />
-  <ToolConfirm v-if="state.pendingTool" :calls="state.pendingTool" />
+    <SkillModal :open="showModal" @close="showModal = false" @submit="onSubmit" />
+    <ToolConfirm v-if="state.pendingTool" :calls="state.pendingTool" />
+  </div>
 </template>
