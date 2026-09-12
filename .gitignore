@@ -1,0 +1,16 @@
+# 运行时数据（会话、检查点、各会话隔离工作目录、自定义技能）
+data/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# 依赖
+node_modules/
+
+# 环境变量（含密钥）
+.env
+
+# 工具/工作区
+.codebuddy/
