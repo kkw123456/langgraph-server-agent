@@ -24,7 +24,7 @@ APP_DIR = "/opt/langgraph-agent"
 
 # 需要上传的内容（相对项目根）
 INCLUDE = [
-    "server.py", "config.py", "workspace.py", "requirements.txt",
+    "server.py", "config.py", "workspace.py", "workbench_store.py", "requirements.txt",
     "README.md", ".env.example",
     "agent", "conversation", "skills", "tools", "auth",
     "static", "deploy/server_setup.sh",
@@ -32,9 +32,30 @@ INCLUDE = [
 EXCLUDE_DIRS = {"__pycache__", ".git", "node_modules", "venv", "data"}
 EXCLUDE_FILES = {".env"}
 
+# server 启动时直接 import 的顶层模块，必须在包内 —— 漏传会导致
+# 服务器上 ModuleNotFoundError 且只在启动日志里体现，容易漏看。
+REQUIRED_MODULES = ["server.py", "config.py", "workspace.py", "workbench_store.py"]
+
 
 def log(msg):
     print(f"[deploy] {msg}", flush=True)
+
+
+def preflight() -> None:
+    """打包前自检：确保 server 依赖的顶层模块都会被上传。
+
+    历史上曾因漏加 workbench_store.py 导致服务器端 ModuleNotFoundError，
+    而错误只出现在 systemd 日志中，本地一切正常。这里提前失败更省事。
+    """
+    missing = [m for m in REQUIRED_MODULES if not os.path.exists(m)]
+    if missing:
+        raise SystemExit(f"[deploy] 缺少必需文件: {', '.join(missing)}")
+    absent = [m for m in REQUIRED_MODULES if m not in INCLUDE]
+    if absent:
+        raise SystemExit(
+            f"[deploy] 以下模块未列入 INCLUDE，将不会被上传: {', '.join(absent)}"
+        )
+    log(f"自检通过（{len(REQUIRED_MODULES)} 个必需模块均在打包清单中）")
 
 
 def make_tarball() -> str:
@@ -95,6 +116,7 @@ def main():
         log("请在项目根目录执行本脚本")
         return 1
 
+    preflight()
     tar_path = make_tarball()
     client = connect()
     try:
