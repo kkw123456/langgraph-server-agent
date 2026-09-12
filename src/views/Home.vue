@@ -183,6 +183,10 @@ function onKeydown(e: KeyboardEvent): void {
   }
 }
 
+// 会话列表轮询：后台任务（自动化触发、其他端发起的对话）的「运行中」
+// 状态需要定期同步；8s 一次，代价仅为一次轻量元数据查询
+let pollTimer: number | undefined
+
 onMounted(async () => {
   await Promise.all([loadConvs(), loadSkills()])
   // 刷新后恢复到最后一次使用的会话（若它仍在列表中），
@@ -192,8 +196,10 @@ onMounted(async () => {
     await selectConv(last)
   }
   window.addEventListener('keydown', onKeydown)
+  pollTimer = window.setInterval(loadConvs, 8000)
 })
 onBeforeUnmount(() => {
+  if (pollTimer) window.clearInterval(pollTimer)
   document.body.style.userSelect = ''
   window.removeEventListener('keydown', onKeydown)
 })

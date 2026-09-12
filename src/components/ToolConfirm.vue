@@ -3,6 +3,7 @@ import { reactive, ref } from 'vue'
 import { NModal, NCard, NSwitch, NInput, NButton, NAlert, NTag } from 'naive-ui'
 import { ShieldAlert, Wrench } from 'lucide-vue-next'
 import { resolveTool } from '../store'
+import { toolLabel } from '../utils/toolLabels'
 import type { PendingToolCall } from '../types'
 
 const props = defineProps<{ calls: PendingToolCall[] }>()
@@ -83,7 +84,10 @@ function cancel(): void {
       <div class="confirm-list">
         <div class="confirm-row" v-for="r in rows" :key="r.id">
           <div class="confirm-head">
-            <span class="confirm-name"><Wrench :size="13" /> {{ r.name }}</span>
+            <span class="confirm-name">
+              <Wrench :size="13" /> {{ toolLabel(r.name) }}
+              <span v-if="toolLabel(r.name) !== r.name" class="confirm-raw">{{ r.name }}</span>
+            </span>
             <span class="confirm-switch">
               <NTag :type="r.allow ? 'success' : 'error'" size="small" :bordered="false">
                 {{ r.allow ? '允许' : '拒绝' }}

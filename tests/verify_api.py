@@ -1,7 +1,7 @@
 """部署前回归：确认前端自适应改造没有影响后端接口与 SPA 路由语义。"""
-import json, urllib.request, urllib.parse, http.cookiejar as cj, sys
+import json, os, urllib.request, urllib.parse, http.cookiejar as cj, sys
 
-B = "http://127.0.0.1:8000"  # 本地服务；线上可改为 http://39.96.79.134:8000
+B = os.environ.get("BASE", "http://127.0.0.1:8000")  # 线上示例：BASE=http://39.96.79.134:8000
 jar = cj.MozillaCookieJar()
 op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
 

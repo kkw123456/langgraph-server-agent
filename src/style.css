@@ -573,7 +573,8 @@ body {
 .confirm-list { display: flex; flex-direction: column; gap: 12px; max-height: min(50vh, 420px); overflow-y: auto; padding-right: 4px; }
 .confirm-row { background: var(--panel2); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; }
 .confirm-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
-.confirm-name { font-weight: 600; color: var(--accent); font-family: "SF Mono", Consolas, monospace; font-size: 13px; display: inline-flex; align-items: center; gap: 6px; }
+.confirm-name { font-weight: 600; color: var(--accent); font-size: 13px; display: inline-flex; align-items: center; gap: 6px; }
+.confirm-raw { font-family: "SF Mono", Consolas, monospace; font-size: 11px; color: var(--muted); font-weight: 400; }
 .confirm-switch { display: inline-flex; align-items: center; gap: 8px; }
 .args-input { margin-top: 8px; font-family: "SF Mono", Consolas, monospace; }
 .args-err { color: var(--danger); font-size: 12px; margin-top: 4px; }

@@ -245,21 +245,23 @@ tail -f /var/log/langgraph-agent.log  # 应用日志
 
 ## 布局与交互验证
 
-`tests/` 下提供三份无需测试框架的自动化验证脚本（依赖 `requests` / `playwright`，Chromium 已由 `playwright install chromium` 安装）：
+`tests/` 下提供四份无需测试框架的自动化验证脚本（依赖 `requests` / `playwright`，Chromium 已由 `playwright install chromium` 安装）：
 
 | 脚本 | 覆盖内容 |
 |---|---|
 | `tests/verify_responsive.py` | **15 档视口**（320→2560px）逐页巡检：无横向溢出、无元素越界、断点结构正确（底部 Tab 栏 / 汉堡按钮 / 三栏列宽）、顶栏控件按断点收起、控制台无错误 |
 | `tests/verify_interaction.py` | 交互可用性：手机端汉堡抽屉导航跳转、会话抽屉开关（Esc）、右面板浮层出现与关闭、**手机端真实对话往返**、平板/桌面面板收起展开与全屏 |
+| `tests/verify_chat_ux.py` | 聊天体验：等待 loading 气泡、markdown 渲染（表格/标题）、工具调用中文名、**停止对话并保留部分内容**、**流式中刷新页面后回放续播**、会话列表「运行中」徽标、手机端右面板浮层不遮顶栏且 tab 不越界 |
 | `tests/verify_api.py` | 后端回归：401 保护、登录、六域接口、runtime 字段、项目/资料 CRUD、模型切换校验、SPA 深链与路由语义（`BASE` 常量可切换本地/线上） |
 
 ```bash
 python3.11 tests/verify_responsive.py    # 需先启动后端并完成 npm run build
 python3.11 tests/verify_interaction.py
+python3.11 tests/verify_chat_ux.py       # 需配置可用的大模型
 python3.11 tests/verify_api.py
 ```
 
-三个脚本全部通过即视为一次完整回归（前端布局 + 交互 + 后端接口 + SPA 路由）。
+四个脚本全部通过即视为一次完整回归（前端布局 + 交互 + 聊天体验 + 后端接口 + SPA 路由）。
 
 ---
 
@@ -282,12 +284,13 @@ python3.11 tests/verify_api.py
 ### 对话（Conversations）
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| `GET` | `/api/conversations` | 列出全部会话 |
+| `GET` | `/api/conversations` | 列出全部会话；每项附 `running` 字段（是否有进行中的轮次，供「运行中」徽标） |
 | `POST` | `/api/conversations` | 新建会话，body: `{"title": "..."}` |
 | `GET` | `/api/conversations/{cid}` | 获取会话元信息 |
 | `DELETE` | `/api/conversations/{cid}` | 删除会话（含其隔离工作目录） |
 | `PATCH` | `/api/conversations/{cid}` | 重命名，body: `{"title": "..."}` |
 | `POST` | `/api/conversations/{cid}/messages` | 非流式回退：body `{"content": "..."}` 返回完整 assistant 消息 |
+| `POST` | `/api/conversations/{cid}/stop` | 停止该会话正在进行的轮次；已生成的部分内容会保留并附「（已手动停止）」标记 |
 
 ### 技能（Skills）
 | 方法 | 路径 | 说明 |
@@ -352,25 +355,30 @@ python3.11 tests/verify_api.py
 WS /ws/{cid}
 ```
 客户端发送文本消息，服务端按事件流式返回（JSON）：
-`message_start` → (`token`)* → (`tool_start` / `tool_end`)* → `message_end` / `error`
+`message_start` → (`reasoning`)* → (`token`)* → (`tool_start` / `tool_end`)* → `message_end` / `error`
 
 **客户端 → 服务端** 消息（JSON，`type` 字段）：
 
 | type | 字段 | 说明 |
 |---|---|---|
 | `message` | `content` | 发送一条用户消息，触发一轮对话 |
-| `set_mode` | `mode`: `auto` / `confirm` | 切换工具调用权限模式 |
+| `set_mode` | `mode`: `auto` / `confirm` | 切换工具调用权限模式（按会话记忆） |
 | `tool_decision` | `action`: `submit`/`cancel`，`calls`: `[{id, action, args?}]` | 在确认模式下就待审批工具给出决策（`submit` 下逐条 `approve`/`deny`，可带编辑后的 `args`；`cancel` 取消本轮） |
-| `cancel` | — | 取消当前正在执行的轮次 |
+| `cancel` / `stop` | — | 停止当前正在执行的轮次（后台任务终止，已生成内容保留） |
 
 **服务端 → 客户端** 新增事件：
 
 | type | 字段 | 说明 |
 |---|---|---|
+| `reasoning` | `content` | 思考链增量（deepseek/ark 等模型的 `reasoning_content`），持久化于消息的 `reasoning` 字段 |
 | `tool_confirm` | `tool_calls`: `[{id, name, args}]` | 确认模式下，工具调用执行前暂停并请求审批 |
 | `mode_set` | `mode` | 模式切换已生效的回执 |
-| `warn` | `content` | 瞬时提示（如「上一轮对话尚未结束，请稍候」） |
+| `warn` | `content` | 瞬时提示（如「当前会话正在回复中，请等待完成或先停止」） |
+| `resume` | `events`: `[...]`, `mode` | 断线重连回放：连接时若该会话仍有一轮在跑，立即整段重放已发生的事件（前端按原序处理即可续看流式输出） |
+| `message_end` | `stopped?` | 轮次结束；`stopped: true` 表示被手动停止 |
 
+> **运行解耦**：每轮对话由 `RunHandle`（`RUNS` 注册表）承载，与 WebSocket 连接解耦——事件同时广播给所有订阅连接并写入回放缓冲；断开连接仅退订、**不终止任务**，刷新页面或换设备重连后凭 `resume` 回放续看。`RUNS` 同时驱动会话列表的 `running` 标记与停止接口；自动化任务触发也走同一机制，执行过程可随时打开会话围观。
+>
 > 实现要点：后端以 `create_react_agent(..., interrupt_before=["tools"])` 编译 ReAct 图，工具节点前中断；确认模式下通过 `update_state` 改写尾部 AI 消息的 `tool_calls`（拒绝的工具直接从列表中移除，**不注入** ToolMessage，否则 ReAct 工具节点会误判调用已完成而跳过其余工具），再以 `Command(resume=True)` 续跑。
 
 ---
