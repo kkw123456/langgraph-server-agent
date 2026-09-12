@@ -30,8 +30,8 @@ python3 - <<'PYEOF'
 import re, os
 
 path = ".env"
-user = os.getenv("AUTH_USER", "bitget")
-pwd = os.getenv("AUTH_PWD", "bitget123456@")
+user = os.getenv("AUTH_USER", "admin")
+pwd = os.getenv("AUTH_PWD", "admin@")
 
 lines = []
 if os.path.exists(path):
