@@ -12,7 +12,7 @@ import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from langgraph.types import Command
 from langgraph.errors import GraphInterrupt
@@ -32,7 +32,7 @@ registry = SkillRegistry(config.DATA_DIR)
 store = ConversationStore(config.DATA_DIR)
 agent_manager = None  # 在 lifespan 中初始化（SqliteSaver 为异步上下文）
 
-LOGIN_PAGE = os.path.join("auth", "login.html")
+INDEX_HTML = os.path.join("static", "index.html")  # Vue SPA 入口
 
 
 def _client_ip(request: Request) -> str:
@@ -101,11 +101,10 @@ async def _unauthorized_handler(request: Request, exc: _Unauthorized):
 # ===================== 登录认证 =====================
 @app.get("/login", response_class=HTMLResponse)
 def login_page():
-    """登录页：已登录则直接跳回主页。"""
-    if not os.path.exists(LOGIN_PAGE):
-        return HTMLResponse("<h3>登录页缺失：auth/login.html</h3>", status_code=500)
-    with open(LOGIN_PAGE, encoding="utf-8") as f:
-        return HTMLResponse(f.read())
+    """登录页：交给前端 Vue 路由处理，此处直接返回 SPA 入口。"""
+    if not os.path.exists(INDEX_HTML):
+        return HTMLResponse("<h3>前端未构建：请先执行 npm run build</h3>", status_code=500)
+    return FileResponse(INDEX_HTML)
 
 
 @app.post("/api/auth/login")
@@ -163,9 +162,15 @@ async def api_auth_check(request: Request):
 
 @app.get("/")
 def index(request: Request):
-    if authmod.enabled() and not _is_logged_in(request):
-        return RedirectResponse("/login", status_code=302)
-    return FileResponse("static/index.html")
+    """主界面入口。未登录时交给前端路由守卫跳转 /login（前端会自行处理）。
+
+    注意：这里不再做 302 重定向，而是统一返回 SPA 入口，由 Vue Router 的
+    全局守卫依据 /api/auth/check 的结果决定渲染登录页还是主界面。
+    这样前端路由是唯一跳转来源，避免服务端与前端两套跳转逻辑互相打架。
+    """
+    if not os.path.exists(INDEX_HTML):
+        return HTMLResponse("<h3>前端未构建：请先执行 npm run build</h3>", status_code=500)
+    return FileResponse(INDEX_HTML)
 
 
 # ===================== 技能管理 =====================

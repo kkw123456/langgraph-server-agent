@@ -10,6 +10,7 @@ import {
   useMessage,
 } from 'naive-ui'
 import App from './App.vue'
+import { router } from './router'
 import './style.css'
 
 // 把 naive-ui 的 message 实例暴露给非组件模块（如 store.ts）使用。
@@ -51,4 +52,4 @@ const Root = defineComponent({
   },
 })
 
-createApp(Root).mount('#app')
+createApp(Root).use(router).mount('#app')

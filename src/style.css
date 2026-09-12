@@ -73,6 +73,11 @@ body {
 .status::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: #c9ced6; }
 .status.on::before { background: var(--ok); box-shadow: 0 0 0 3px #e6f4ea; }
 
+/* 顶栏当前用户 / 退出登录 */
+.user-btn .uname { max-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.user-btn .logout-glyph { margin-left: 6px; opacity: .55; }
+.user-btn:hover .logout-glyph { opacity: 1; }
+
 /* ============ 消息区 ============ */
 .chat-view { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 .messages { flex: 1; overflow-y: auto; padding: 24px 0; display: flex; flex-direction: column; min-height: 0; }
