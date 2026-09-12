@@ -1,5 +1,6 @@
 """LangGraph 服务端 Agent —— FastAPI 后端。
 
+- 登录认证：HttpOnly Cookie 会话，未登录跳转 /login；可通过 AUTH_USERNAME/PASSWORD 关闭。
 - 多会话：每个会话对应一个 LangGraph thread_id，状态由 SqliteSaver 持久化。
 - 工具调用：ReAct 图自动调用技能提供的工具；支持「自动 / 确认」两种权限模式。
 - 技能管理：REST 接口启停 / 新建 / 删除自定义技能。
@@ -10,13 +11,14 @@ import json
 import asyncio
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
+from fastapi import Depends, FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from langgraph.types import Command
 from langgraph.errors import GraphInterrupt
 
 import config
+import auth as authmod
 from skills.registry import SkillRegistry
 from agent.builder import AgentManager
 from conversation.store import ConversationStore
@@ -29,6 +31,32 @@ MODE_TIMEOUT = 600
 registry = SkillRegistry(config.DATA_DIR)
 store = ConversationStore(config.DATA_DIR)
 agent_manager = None  # 在 lifespan 中初始化（SqliteSaver 为异步上下文）
+
+LOGIN_PAGE = os.path.join("auth", "login.html")
+
+
+def _client_ip(request: Request) -> str:
+    """优先取反向代理传递的真实 IP。"""
+    fwd = request.headers.get("x-forwarded-for", "")
+    if fwd:
+        return fwd.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def _is_logged_in(request: Request) -> bool:
+    return authmod.verify_session(request.cookies.get(authmod.COOKIE_NAME)) is not None
+
+
+async def require_auth(request: Request):
+    """REST 接口依赖：未登录返回 401。认证关闭时直接放行。"""
+    if not authmod.enabled():
+        return None
+    if not _is_logged_in(request):
+        raise _Unauthorized()
+
+
+class _Unauthorized(Exception):
+    """由异常处理器转为 401 JSON 响应。"""
 
 
 class Conn:
@@ -62,30 +90,103 @@ app = FastAPI(title="LangGraph 服务端 Agent", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
+@app.exception_handler(_Unauthorized)
+async def _unauthorized_handler(request: Request, exc: _Unauthorized):
+    """未登录访问受保护接口时统一返回 401 JSON。"""
+    return JSONResponse(
+        {"ok": False, "error": "未登录", "code": "unauthorized"}, status_code=401
+    )
+
+
+# ===================== 登录认证 =====================
+@app.get("/login", response_class=HTMLResponse)
+def login_page():
+    """登录页：已登录则直接跳回主页。"""
+    if not os.path.exists(LOGIN_PAGE):
+        return HTMLResponse("<h3>登录页缺失：auth/login.html</h3>", status_code=500)
+    with open(LOGIN_PAGE, encoding="utf-8") as f:
+        return HTMLResponse(f.read())
+
+
+@app.post("/api/auth/login")
+async def api_login(request: Request):
+    body = await request.json()
+    username = (body.get("username") or "").strip()
+    password = body.get("password") or ""
+    remember = bool(body.get("remember"))
+    ip = _client_ip(request)
+
+    if not authmod.enabled():
+        return {"ok": True, "note": "认证未启用"}
+
+    remain = authmod.is_locked(ip)
+    if remain:
+        return JSONResponse(
+            {"ok": False, "error": f"尝试过于频繁，请 {remain} 秒后再试"}, status_code=429
+        )
+
+    if not authmod.check_credentials(username, password):
+        authmod.record_fail(ip)
+        # 统一提示，不泄露是用户名还是密码错误
+        return JSONResponse({"ok": False, "error": "用户名或密码错误"}, status_code=401)
+
+    authmod.clear_fails(ip)
+    ttl = authmod.SESSION_TTL if remember else authmod.SESSION_TTL_SHORT
+    token = authmod.make_session(username, ttl)
+    resp = JSONResponse({"ok": True, "username": username})
+    resp.set_cookie(
+        authmod.COOKIE_NAME, token,
+        max_age=ttl, httponly=True,
+        samesite="lax", secure=config.AUTH_COOKIE_SECURE, path="/",
+    )
+    return resp
+
+
+@app.post("/api/auth/logout")
+async def api_logout():
+    resp = JSONResponse({"ok": True})
+    # 删除时的属性必须与写入时一致（httponly/samesite/secure/path），
+    # 否则浏览器可能不认为这是同一个 Cookie，导致退出登录无效。
+    resp.set_cookie(
+        authmod.COOKIE_NAME, "",
+        max_age=0, expires=0, httponly=True,
+        samesite="lax", secure=config.AUTH_COOKIE_SECURE, path="/",
+    )
+    return resp
+
+
+@app.get("/api/auth/check")
+async def api_auth_check(request: Request):
+    user = authmod.verify_session(request.cookies.get(authmod.COOKIE_NAME))
+    return {"authenticated": user is not None, "username": user, "enabled": authmod.enabled()}
+
+
 @app.get("/")
-def index():
+def index(request: Request):
+    if authmod.enabled() and not _is_logged_in(request):
+        return RedirectResponse("/login", status_code=302)
     return FileResponse("static/index.html")
 
 
 # ===================== 技能管理 =====================
-@app.get("/api/skills")
+@app.get("/api/skills", dependencies=[Depends(require_auth)])
 def api_skills():
     return registry.list()
 
 
-@app.post("/api/skills/{sid}/enable")
+@app.post("/api/skills/{sid}/enable", dependencies=[Depends(require_auth)])
 def api_enable(sid: str):
     ok = registry.enable(sid)
     return {"ok": ok, "enabled": registry.is_enabled(sid)}
 
 
-@app.post("/api/skills/{sid}/disable")
+@app.post("/api/skills/{sid}/disable", dependencies=[Depends(require_auth)])
 def api_disable(sid: str):
     ok = registry.disable(sid)
     return {"ok": ok, "enabled": registry.is_enabled(sid)}
 
 
-@app.post("/api/skills/custom")
+@app.post("/api/skills/custom", dependencies=[Depends(require_auth)])
 async def api_add_custom(body: dict):
     name = body.get("name", "")
     description = body.get("description", "")
@@ -99,23 +200,23 @@ async def api_add_custom(body: dict):
         return {"ok": False, "error": str(e)}
 
 
-@app.delete("/api/skills/{sid}")
+@app.delete("/api/skills/{sid}", dependencies=[Depends(require_auth)])
 def api_remove(sid: str):
     return {"ok": registry.remove_custom(sid)}
 
 
-@app.post("/api/skills/reload")
+@app.post("/api/skills/reload", dependencies=[Depends(require_auth)])
 def api_reload():
     return {"ok": True, "skills": registry.reload()}
 
 
 # ===================== 会话管理 =====================
-@app.get("/api/conversations")
+@app.get("/api/conversations", dependencies=[Depends(require_auth)])
 def api_conv_list():
     return store.list()
 
 
-@app.post("/api/conversations")
+@app.post("/api/conversations", dependencies=[Depends(require_auth)])
 async def api_conv_create(body: dict = None):
     title = (body or {}).get("title", "新对话")
     conv = store.create(title)
@@ -123,7 +224,7 @@ async def api_conv_create(body: dict = None):
     return conv
 
 
-@app.get("/api/conversations/{cid}")
+@app.get("/api/conversations/{cid}", dependencies=[Depends(require_auth)])
 def api_conv_get(cid: str):
     meta = store.get(cid)
     if not meta:
@@ -131,13 +232,13 @@ def api_conv_get(cid: str):
     return {"ok": True, "meta": meta, "messages": store.load_messages(cid)}
 
 
-@app.delete("/api/conversations/{cid}")
+@app.delete("/api/conversations/{cid}", dependencies=[Depends(require_auth)])
 def api_conv_delete(cid: str):
     store.delete(cid)
     return {"ok": True}
 
 
-@app.patch("/api/conversations/{cid}")
+@app.patch("/api/conversations/{cid}", dependencies=[Depends(require_auth)])
 async def api_conv_rename(cid: str, body: dict):
     store.rename(cid, body.get("title", "新对话"))
     return {"ok": True}
@@ -178,7 +279,7 @@ def _read_file_view(full: str, path: str) -> dict:
             "note": "二进制文件，无法直接预览，请下载。"}
 
 
-@app.get("/api/conversations/{cid}/files")
+@app.get("/api/conversations/{cid}/files", dependencies=[Depends(require_auth)])
 def api_files(cid: str, path: str = ""):
     if not store.get(cid):
         return {"ok": False, "error": "会话不存在"}
@@ -211,7 +312,7 @@ def api_files(cid: str, path: str = ""):
     return {"ok": False, "error": "路径不存在"}
 
 
-@app.get("/api/conversations/{cid}/files/raw")
+@app.get("/api/conversations/{cid}/files/raw", dependencies=[Depends(require_auth)])
 def api_files_raw(cid: str, path: str = ""):
     if not store.get(cid):
         return {"ok": False, "error": "会话不存在"}
@@ -225,7 +326,7 @@ def api_files_raw(cid: str, path: str = ""):
 
 
 # ===================== 对话（非流式回退） =====================
-@app.post("/api/conversations/{cid}/messages")
+@app.post("/api/conversations/{cid}/messages", dependencies=[Depends(require_auth)])
 async def api_send(cid: str, body: dict):
     content = body.get("content", "")
     result = await run_turn(cid, content, None)
@@ -236,6 +337,15 @@ async def api_send(cid: str, body: dict):
 @app.websocket("/ws/{cid}")
 async def ws_endpoint(websocket: WebSocket, cid: str):
     await websocket.accept()
+    # WebSocket 无法用 HTTP 依赖，此处手工校验会话 Cookie
+    if authmod.enabled():
+        token = websocket.cookies.get(authmod.COOKIE_NAME)
+        if authmod.verify_session(token) is None:
+            await websocket.send_json(
+                {"type": "error", "content": "未登录", "code": "unauthorized"}
+            )
+            await websocket.close(code=4401)
+            return
     if not store.get(cid):
         await websocket.send_json({"type": "error", "content": "会话不存在"})
         await websocket.close()

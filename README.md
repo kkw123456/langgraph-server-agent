@@ -44,7 +44,9 @@
 ├── requirements.txt          # Python 依赖
 ├── run.sh                    # 一键安装依赖并启动后端
 ├── agent/                    # Agent 构建（模型、系统提示词、工具聚合）
+├── auth/                     # 登录认证（login.html + 签名令牌/限流逻辑）
 ├── conversation/             # 会话存储（SQLite 元数据 + 消息历史，含 JSON 迁移脚本）
+├── deploy/                   # 自动化部署（deploy.py 打包上传 + server_setup.sh）
 ├── skills/                   # 技能注册表 + 内置/自定义技能
 ├── tools/                    # 内置工具（calculator、web_fetch、run_python、list_dir、read_file …）
 ├── index.html                # Vite 入口
@@ -105,8 +107,31 @@ npm run build      # 输出到 static/，之后访问 http://localhost:8000/ 即
 | `TEMPERATURE` | 采样温度 | `0.3` |
 | `HOST` / `PORT` | 服务监听地址 / 端口 | `0.0.0.0` / `8000` |
 | `DATA_DIR` | 运行时数据目录 | `data` |
+| `AUTH_USERNAME` | 登录用户名（留空则**关闭**登录校验） | 空 |
+| `AUTH_PASSWORD` | 登录密码 | 空 |
+| `AUTH_COOKIE_SECURE` | 走 HTTPS 时设为 `true`（Cookie 加 `Secure`） | `false` |
+| `AUTH_SECRET` | 令牌签名密钥（不填会自动生成并持久化） | 自动 |
 
 `.env.example` 默认填好 **DeepSeek**（国内可直连）的配置，取消注释 OpenAI 段即可切换。
+
+> **注意**：`OPENAI_BASE_URL` / `MODEL` 等键若在 `.env` 中重复出现，`python-dotenv` 以**最后一次**出现为准。
+> 切换服务商时记得把不需要的那几行注释掉，否则旧值会覆盖新值。
+
+### 3.1 登录认证
+
+同时配置 `AUTH_USERNAME` 与 `AUTH_PASSWORD` 即启用登录保护；两者留空则完全跳过（方便本地开发）。
+
+| 能力 | 说明 |
+|---|---|
+| 登录页 | `/login`，未登录访问 `/` 会 302 跳转过去 |
+| 会话保持 | 签名令牌存于 **HttpOnly Cookie**，JS 读不到，降低 XSS 窃取风险 |
+| 有效期 | 勾选「记住我」7 天，否则 12 小时 |
+| 接口保护 | 全部 14 个 REST 接口返回 401；WebSocket 以 `4401` 关闭 |
+| 暴力破解防护 | 同一 IP 连续失败 8 次锁定 5 分钟 |
+| 退出登录 | `POST /api/auth/logout` 清除 Cookie |
+
+> 密码以明文比对（`hmac.compare_digest` 常量时间），**请务必在部署后修改默认密码**，
+> 并建议只在内网或加 HTTPS 反代的场景下对外暴露。
 
 ### 4. 一键启动（npm 脚本）
 
@@ -124,9 +149,58 @@ npm run build      # 输出到 static/，之后访问 http://localhost:8000/ 即
 
 ---
 
+## 部署到服务器
+
+`deploy/` 下提供了自动化部署脚本，目标机需为 **Ubuntu / Debian**、已装 `python3` 与 `systemd`。
+
+```bash
+# 默认部署到脚本内配置的服务器
+python3 deploy/deploy.py
+
+# 覆盖目标机（推荐用环境变量，避免把密码写进代码）
+DEPLOY_HOST=1.2.3.4 DEPLOY_PORT=22 DEPLOY_USER=root DEPLOY_PWD='你的密码' \
+  python3 deploy/deploy.py
+
+# 只更新代码、跳过 pip 安装（二次部署更快）
+python3 deploy/deploy.py --no-deps
+```
+
+脚本会依次完成：
+
+1. 打包项目（排除 `data/`、`node_modules/`、`__pycache__`、`.env` 等）
+2. SFTP 上传并解压到 `/opt/langgraph-agent`
+3. 建 venv 并安装 `requirements.txt`
+4. 写入 `.env` 的登录账号密码（保留已有配置）
+5. 注册 **systemd** 服务 `langgraph-agent`（开机自启、崩溃自动重启）
+6. 轮询 `/login` 直到服务就绪，并打印状态
+
+部署后管理服务：
+
+```bash
+systemctl status  langgraph-agent     # 查看状态
+systemctl restart langgraph-agent     # 重启
+journalctl -u langgraph-agent -f      # 实时日志
+tail -f /var/log/langgraph-agent.log  # 应用日志
+```
+
+> **首次部署后请立刻修改 `.env` 里的 `AUTH_PASSWORD`**，并 `systemctl restart langgraph-agent` 生效。
+> 若服务器有安全组/防火墙，需放行 `8000` 端口。生产环境建议前置 Nginx 并配置 HTTPS。
+
+---
+
 ## API 参考
 
 所有 REST 接口前缀均为 `/api`。
+
+### 认证（Auth）
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| `GET` | `/login` | 登录页面（已登录会自动跳回 `/`） |
+| `POST` | `/api/auth/login` | 登录，body: `{"username","password","remember"}`，成功后下发 HttpOnly Cookie |
+| `POST` | `/api/auth/logout` | 退出登录，清除 Cookie |
+| `GET` | `/api/auth/check` | 查询登录态，返回 `{"authenticated","username","enabled"}` |
+
+> 除上表与 `/`、`/static/*` 外，其余接口均需登录；未登录时 REST 返回 `401`，WebSocket 以 `4401` 关闭。
 
 ### 对话（Conversations）
 | 方法 | 路径 | 说明 |
