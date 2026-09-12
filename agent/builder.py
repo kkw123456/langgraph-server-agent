@@ -53,6 +53,8 @@ class AgentManager:
                 tools=tools,
                 prompt=self._system_prompt(),
                 checkpointer=self.checkpointer,
+                # 在 tools 节点前中断，便于在「确认模式」下让用户审批工具调用
+                interrupt_before=["tools"],
             )
             self._cache = {key: agent}
             self._cache_key = key

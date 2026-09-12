@@ -11,10 +11,14 @@
 
 - **多会话管理**：每个会话独立 `thread_id`，对话历史持久化（SQLite 检查点 + JSON 消息记录），可新建 / 切换 / 重命名 / 删除。
 - **流式对话**：通过 WebSocket 实时推送 `message_start / token / tool_start / tool_end / message_end / error` 事件，前端逐字渲染。
+- **工具调用权限确认**：支持 **自动（auto）** 与 **确认（confirm）** 两种模式。确认模式下，每次工具调用前会暂停并向用户弹出审批框，可逐条 **允许 / 拒绝**，并 **编辑工具参数**；拒绝的工具不会执行。模式可在对话顶部一键切换，并通过 WebSocket 实时同步到后端。
 - **工具调用**：内置数学计算、网页抓取、受限 Python 执行、文件读写、时间查询等工具；每次调用在界面中以可折叠块展示输入 / 输出。
 - **技能管理**：内置技能可启停；支持通过 `@tool` 代码动态创建自定义技能、删除、重载；启用的技能会自动注入系统提示词与可用工具集。
 - **会话级隔离工作目录**：每个会话拥有独立目录 `data/workspaces/{cid}`，互不串扰；工具（如 `run_python`）在隔离目录内执行，产物只落在该会话空间。
-- **Web 文件浏览**：右侧「文件」标签页可浏览当前会话工作目录（目录树、文本预览、二进制下载、返回上级、刷新）。
+- **Web 文件浏览**：右侧面板可浏览当前会话工作目录（目录树、文本预览、二进制下载、返回上级、刷新）。
+- **三区布局 + 可收起/全屏面板**：左侧会话栏（顶部「新建对话」）、中间主区（顶部菜单：对话 / 技能管理）、右侧文件与预览面板。右侧面板支持 **拖拽调宽、收起到图标条、完全收起、全屏** 四种状态。
+- **独立技能管理页**：顶部菜单「技能管理」进入专门页面，支持关键词搜索、分类筛选、卡片式展示（开关启停 / 删除自定义 / 重载 / 新建）。
+- **现代化图标**：全站图标统一使用主流图标库 [lucide](https://lucide.dev/)（`lucide-vue-next`），并采用亮色主题与流式「打字机」光标效果。
 
 ---
 
@@ -103,6 +107,20 @@ npm run build      # 输出到 static/，之后访问 http://localhost:8000/ 即
 
 `.env.example` 默认填好 **DeepSeek**（国内可直连）的配置，取消注释 OpenAI 段即可切换。
 
+### 4. 一键启动（npm 脚本）
+
+`package.json` 内置了启动脚本，无需手动分别敲命令：
+
+| 命令 | 说明 |
+|---|---|
+| `npm run py:install` | 安装 Python 依赖（`pip install -r requirements.txt`） |
+| `npm run py` | 仅启动后端（Uvicorn，监听 `:8000`） |
+| `npm run dev` | 仅启动前端（Vite 开发服务器，`:5173`，代理 `/api`、`/ws` 到 `:8000`） |
+| `npm start` | **一键启动（开发模式）**：用 `concurrently` 同时拉起后端 + 前端，两个进程一键管理、一起退出 |
+| `npm run start:prod` | **一键启动（生产模式）**：先 `build` 再启动后端，由 FastAPI 直接托管 `static/`，单进程访问 `http://localhost:8000/` 即可 |
+
+> 开发模式打开 **http://localhost:5173/static/**；生产模式（或只想跑一个进程时）打开 **http://localhost:8000/**。
+
 ---
 
 ## API 参考
@@ -144,6 +162,25 @@ WS /ws/{cid}
 ```
 客户端发送文本消息，服务端按事件流式返回（JSON）：
 `message_start` → (`token`)* → (`tool_start` / `tool_end`)* → `message_end` / `error`
+
+**客户端 → 服务端** 消息（JSON，`type` 字段）：
+
+| type | 字段 | 说明 |
+|---|---|---|
+| `message` | `content` | 发送一条用户消息，触发一轮对话 |
+| `set_mode` | `mode`: `auto` / `confirm` | 切换工具调用权限模式 |
+| `tool_decision` | `action`: `submit`/`cancel`，`calls`: `[{id, action, args?}]` | 在确认模式下就待审批工具给出决策（`submit` 下逐条 `approve`/`deny`，可带编辑后的 `args`；`cancel` 取消本轮） |
+| `cancel` | — | 取消当前正在执行的轮次 |
+
+**服务端 → 客户端** 新增事件：
+
+| type | 字段 | 说明 |
+|---|---|---|
+| `tool_confirm` | `tool_calls`: `[{id, name, args}]` | 确认模式下，工具调用执行前暂停并请求审批 |
+| `mode_set` | `mode` | 模式切换已生效的回执 |
+| `warn` | `content` | 瞬时提示（如「上一轮对话尚未结束，请稍候」） |
+
+> 实现要点：后端以 `create_react_agent(..., interrupt_before=["tools"])` 编译 ReAct 图，工具节点前中断；确认模式下通过 `update_state` 改写尾部 AI 消息的 `tool_calls`（拒绝的工具直接从列表中移除，**不注入** ToolMessage，否则 ReAct 工具节点会误判调用已完成而跳过其余工具），再以 `Command(resume=True)` 续跑。
 
 ---
 

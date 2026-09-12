@@ -28,6 +28,16 @@ export interface Skill {
   enabled: boolean
 }
 
+// 工具调用权限模式：auto 自动执行 / confirm 执行前需用户确认
+export type ToolMode = 'auto' | 'confirm'
+
+// 等待用户审批的单个工具调用（后端 tool_confirm 事件携带）
+export interface PendingToolCall {
+  id: string
+  name: string
+  args: unknown
+}
+
 // 后端 WebSocket 推送的事件联合类型
 export type WsEvent =
   | { type: 'message_start' }
@@ -36,6 +46,9 @@ export type WsEvent =
   | { type: 'tool_end'; output: string }
   | { type: 'message_end' }
   | { type: 'error'; content: string }
+  | { type: 'tool_confirm'; tool_calls: PendingToolCall[] }
+  | { type: 'mode_set'; mode: ToolMode }
+  | { type: 'warn'; content: string }
 
 export interface CreateSkillPayload {
   name: string

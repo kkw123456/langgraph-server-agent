@@ -1,6 +1,6 @@
 import { reactive } from 'vue'
 import { api } from './api'
-import type { Conversation, Message, Skill, WsEvent, CreateSkillPayload } from './types'
+import type { Conversation, Message, Skill, WsEvent, CreateSkillPayload, ToolMode, PendingToolCall } from './types'
 
 interface AppState {
   convs: Conversation[]
@@ -10,6 +10,9 @@ interface AppState {
   status: string
   skills: Skill[]
   live: Message | null
+  mode: ToolMode            // 工具调用权限模式
+  pendingTool: PendingToolCall[] | null  // 待用户审批的工具调用（确认模式）
+  warn: string             // 瞬时提示（如「上一轮尚未结束」）
 }
 
 // 轻量级全局 store：单一响应式 state + 动作函数。
@@ -22,6 +25,9 @@ export const state = reactive<AppState>({
   status: '○ 未连接',
   skills: [],
   live: null, // 正在流式输出的助手消息
+  mode: 'auto',
+  pendingTool: null,
+  warn: '',
 })
 
 let ws: WebSocket | null = null
@@ -34,7 +40,11 @@ function connectWs(id: string): void {
   closeWs()
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
   ws = new WebSocket(`${proto}://${location.host}/ws/${id}`)
-  ws.onopen = () => { state.status = '● 已连接' }
+  ws.onopen = () => {
+    state.status = '● 已连接'
+    // 重连后把当前权限模式同步给后端，确保 conn.mode 与前端一致
+    ws!.send(JSON.stringify({ type: 'set_mode', mode: state.mode }))
+  }
   ws.onclose = () => { state.status = '○ 已断开' }
   ws.onmessage = (ev: MessageEvent) => handleEvent(JSON.parse(ev.data) as WsEvent)
 }
@@ -71,6 +81,17 @@ function handleEvent(msg: WsEvent): void {
       if (state.live) state.live.content += '\n[错误] ' + msg.content
       else state.messages.push({ role: 'assistant', content: '[错误] ' + msg.content })
       break
+    case 'tool_confirm':
+      // 后端在「确认模式」下暂停工具执行，等待前端决策
+      state.pendingTool = msg.tool_calls
+      break
+    case 'mode_set':
+      state.mode = msg.mode
+      break
+    case 'warn':
+      state.warn = msg.content
+      window.setTimeout(() => { if (state.warn === msg.content) state.warn = '' }, 3000)
+      break
   }
 }
 
@@ -83,6 +104,8 @@ export async function selectConv(id: string): Promise<void> {
   closeWs()
   state.current = id
   state.live = null
+  state.pendingTool = null
+  state.warn = ''
   const d = await api.get<{ meta?: Conversation; messages?: Message[] }>(`/api/conversations/${id}`)
   state.convTitle = d.meta ? d.meta.title : '未选择会话'
   state.messages = d.messages ?? []
@@ -94,9 +117,28 @@ export async function newChat(): Promise<void> {
   closeWs()
   state.current = null
   state.live = null
+  state.pendingTool = null
+  state.warn = ''
   state.messages = []
   state.convTitle = '新对话'
   await loadConvs()
+}
+
+// ===================== 工具调用权限模式 =====================
+export function setMode(mode: ToolMode): void {
+  state.mode = mode
+  if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'set_mode', mode }))
+}
+
+// 就待确认的工具调用给出决策：action=submit 带每条调用 approve/deny 与可编辑 args；action=cancel 表示取消本轮
+export function resolveTool(decision: {
+  action: 'submit' | 'cancel'
+  calls?: { id: string; action?: 'approve' | 'deny'; args?: unknown }[]
+}): void {
+  if (ws && ws.readyState === 1) {
+    ws.send(JSON.stringify({ type: 'tool_decision', action: decision.action, calls: decision.calls ?? [] }))
+  }
+  state.pendingTool = null
 }
 
 export async function deleteConv(id: string): Promise<void> {

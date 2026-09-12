@@ -8,13 +8,19 @@
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
     "type-check": "vue-tsc --noEmit",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "py:install": "pip install -r requirements.txt",
+    "py": "uvicorn server:app --host 0.0.0.0 --port 8000 --reload",
+    "start": "concurrently -k -n server,web -c blue,green \"npm:py\" \"npm:dev\"",
+    "start:prod": "npm run build && npm run py"
   },
   "dependencies": {
+    "lucide-vue-next": "^1.0.0",
     "vue": "^3.5.42"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^6.0.8",
+    "concurrently": "^9.1.0",
     "typescript": "^5.6.0",
     "vite": "^8.3.0",
     "vue-tsc": "^2.1.0"

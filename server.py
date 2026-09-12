@@ -1,17 +1,20 @@
 """LangGraph 服务端 Agent —— FastAPI 后端。
 
 - 多会话：每个会话对应一个 LangGraph thread_id，状态由 SqliteSaver 持久化。
-- 工具调用：ReAct 图自动调用技能提供的工具。
+- 工具调用：ReAct 图自动调用技能提供的工具；支持「自动 / 确认」两种权限模式。
 - 技能管理：REST 接口启停 / 新建 / 删除自定义技能。
-- 流式对话：WebSocket 推送 token 与工具调用事件。
+- 流式对话：WebSocket 推送 token、工具调用事件与（确认模式下）工具审批请求。
 """
 import os
 import json
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from langgraph.types import Command
+from langgraph.errors import GraphInterrupt
 
 import config
 from skills.registry import SkillRegistry
@@ -19,10 +22,30 @@ from agent.builder import AgentManager
 from conversation.store import ConversationStore
 import workspace
 
+# 确认模式下等待用户决策的最长等待时间（秒），超时视为全部拒绝
+MODE_TIMEOUT = 600
+
 # ---- 全局单例 ----
 registry = SkillRegistry(config.DATA_DIR)
 store = ConversationStore(config.DATA_DIR)
 agent_manager = None  # 在 lifespan 中初始化（SqliteSaver 为异步上下文）
+
+
+class Conn:
+    """单个 WebSocket 连接的上下文。
+
+    - mode: 工具调用权限模式，"auto" 自动执行 / "confirm" 执行前需用户确认。
+    - pending: 确认模式下等待用户决策时挂起的 asyncio.Future。
+    - task: 本轮对话（run_turn）的后台任务，便于在收到 cancel 或断线时取消。
+    - busy: 是否正在处理一轮对话（防止并发重入）。
+    """
+
+    def __init__(self, ws: WebSocket):
+        self.ws = ws
+        self.mode = "auto"
+        self.pending: asyncio.Future | None = None
+        self.task: asyncio.Task | None = None
+        self.busy = False
 
 
 @asynccontextmanager
@@ -217,24 +240,67 @@ async def ws_endpoint(websocket: WebSocket, cid: str):
         await websocket.send_json({"type": "error", "content": "会话不存在"})
         await websocket.close()
         return
+    conn = Conn(websocket)
+
+    def _done(task: asyncio.Task) -> None:
+        conn.busy = False
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc and not isinstance(exc, asyncio.CancelledError):
+            print("[run_turn] 未捕获异常:", exc)
+
     try:
         while True:
             data = await websocket.receive_json()
-            if data.get("type") == "message":
-                await run_turn(cid, data.get("content", ""), websocket)
+            t = data.get("type")
+            if t == "message":
+                if conn.busy:
+                    await websocket.send_json(
+                        {"type": "warn", "content": "上一轮对话尚未结束，请稍候。"}
+                    )
+                    continue
+                conn.busy = True
+                conn.task = asyncio.create_task(run_turn(cid, data.get("content", ""), conn))
+                conn.task.add_done_callback(_done)
+                # 注意：此处不 await run_turn，接收循环继续运行，
+                # 以便在「确认模式」下收到客户端的 tool_decision / cancel 消息。
+            elif t == "set_mode":
+                m = data.get("mode")
+                if m in ("auto", "confirm"):
+                    conn.mode = m
+                    await websocket.send_json({"type": "mode_set", "mode": m})
+            elif t == "tool_decision":
+                # 客户端就待确认的工具调用作出决策
+                if conn.pending and not conn.pending.done():
+                    conn.pending.set_result(data)
+            elif t == "cancel":
+                if conn.task and not conn.task.done():
+                    conn.task.cancel()
+                conn.busy = False
     except WebSocketDisconnect:
-        pass
+        if conn.task and not conn.task.done():
+            conn.task.cancel()
     except Exception as e:
         try:
             await websocket.send_json({"type": "error", "content": str(e)})
         except Exception:
             pass
+        if conn.task and not conn.task.done():
+            conn.task.cancel()
 
 
-async def run_turn(cid: str, content: str, websocket):
-    """执行一轮对话。websocket 为 None 时走非流式（REST）。"""
-    # 绑定当前会话隔离的工作目录，工具在执行时会自动作用于此目录
+async def run_turn(cid: str, content: str, conn: Conn | None):
+    """执行一轮对话。
+
+    conn 为 None 时走非流式（REST 回退），强制为自动模式。
+    在「确认模式」下，工具调用会在执行前被中断并推送 tool_confirm 事件，
+    等待客户端决策（approve / deny / cancel）后通过 Command(resume) 继续。
+    """
+    ws = conn.ws if conn else None
+    mode = conn.mode if conn else "auto"
     token = workspace.current_workspace.set(workspace.get_workspace(cid))
+    cancelled = False
     try:
         messages = store.load_messages(cid)
         messages.append({"role": "user", "content": content})
@@ -244,57 +310,146 @@ async def run_turn(cid: str, content: str, websocket):
             agent = agent_manager.get_agent()
         except Exception as e:
             err = f"Agent 初始化失败: {e}"
-            if websocket:
-                await websocket.send_json({"type": "error", "content": err})
+            if ws:
+                await ws.send_json({"type": "error", "content": err})
             return {"assistant": {"role": "assistant", "content": err, "tool_calls": []}}
 
-        if websocket:
-            await websocket.send_json({"type": "message_start"})
+        if ws:
+            await ws.send_json({"type": "message_start"})
 
-        try:
-            async for event in agent.astream_events(
-                {"messages": [("user", content)]},
-                config={"configurable": {"thread_id": cid}},
-                version="v2",
-            ):
-                kind = event.get("event")
-                if kind == "on_chat_model_stream":
-                    text = _chunk_text(event["data"]["chunk"])
-                    if text:
-                        assistant["content"] += text
-                        if websocket:
-                            await websocket.send_json({"type": "token", "content": text})
-                elif kind == "on_tool_start":
-                    tc = {
-                        "name": event.get("name", ""),
-                        "input": _safe_str(event["data"].get("input")),
-                        "output": "",
-                    }
-                    assistant["tool_calls"].append(tc)
-                    if websocket:
-                        await websocket.send_json({"type": "tool_start", "name": tc["name"], "input": tc["input"]})
-                elif kind == "on_tool_end":
-                    out = _safe_str(event["data"].get("output"))
-                    _attach_output(assistant, out)
-                    if websocket:
-                        await websocket.send_json({"type": "tool_end", "output": out[:3000]})
-        except Exception as e:
-            err = f"执行出错: {e}"
-            assistant["content"] += f"\n[{err}]"
-            if websocket:
-                await websocket.send_json({"type": "error", "content": err})
+        config = {"configurable": {"thread_id": cid}}
+        # 首轮输入为用户消息；后续轮次为中断后的 resume 续跑。Agent 已开启
+        # interrupt_before=["tools"]，因此每一次工具调用前都会在此循环中被拦截。
+        first = True
+        while True:
+            inp = {"messages": [("user", content)]} if first else Command(resume=True)
+            first = False
+            interrupted = False
+            try:
+                async for event in agent.astream_events(inp, config=config, version="v2"):
+                    kind = event.get("event")
+                    if kind == "on_chat_model_stream":
+                        text = _chunk_text(event["data"]["chunk"])
+                        if text:
+                            assistant["content"] += text
+                            if ws:
+                                await ws.send_json({"type": "token", "content": text})
+                    elif kind == "on_tool_start":
+                        tc = {
+                            "name": event.get("name", ""),
+                            "input": _safe_str(event["data"].get("input")),
+                            "output": "",
+                        }
+                        assistant["tool_calls"].append(tc)
+                        if ws:
+                            await ws.send_json({"type": "tool_start", "name": tc["name"], "input": tc["input"]})
+                    elif kind == "on_tool_end":
+                        out = _safe_str(event["data"].get("output"))
+                        _attach_output(assistant, out)
+                        if ws:
+                            await ws.send_json({"type": "tool_end", "output": out[:3000]})
+            except GraphInterrupt:
+                interrupted = True
+            except asyncio.CancelledError:
+                cancelled = True
+                break
+            except Exception as e:
+                err = f"执行出错: {e}"
+                assistant["content"] += f"\n[{err}]"
+                if ws:
+                    await ws.send_json({"type": "error", "content": err})
+                break
 
-        messages.append(assistant)
-        store.save_messages(cid, messages)
-        store.touch(cid)
-        meta = store.get(cid)
-        if meta and (not meta.get("title") or meta.get("title") == "新对话"):
-            store.rename(cid, content[:30])
-        if websocket:
-            await websocket.send_json({"type": "message_end"})
+            # astream_events 遇中断不会抛异常，需通过状态机判定是否停在 tools 前
+            if not interrupted:
+                st = agent.get_state(config)
+                if st.next and "tools" in st.next:
+                    interrupted = True
+
+            if not interrupted:
+                break  # 正常完成
+
+            # 仅在「确认模式」且为 WebSocket 连接时才向用户请求审批
+            if mode != "confirm" or not ws:
+                continue  # 自动模式：直接 resume 执行
+
+            st = agent.get_state(config)
+            ai = st.values["messages"][-1]
+            pending = [
+                {"id": tc["id"], "name": tc["name"], "args": tc["args"]}
+                for tc in (ai.tool_calls or [])
+            ]
+            if not pending:
+                continue
+            await ws.send_json({"type": "tool_confirm", "tool_calls": pending})
+
+            conn.pending = asyncio.get_event_loop().create_future()
+            try:
+                decision = await asyncio.wait_for(conn.pending, timeout=MODE_TIMEOUT)
+            except asyncio.TimeoutError:
+                decision = {"action": "deny"}  # 超时视为全部拒绝
+            except asyncio.CancelledError:
+                cancelled = True
+                break
+            finally:
+                conn.pending = None
+
+            if decision.get("action") == "cancel":
+                assistant["content"] += "\n[用户取消了工具调用]"
+                decision = {"action": "deny"}  # 取消等价于拒绝本轮全部工具
+
+            # 依据决策改写本轮 tool_calls（拒绝的工具不会执行），然后续跑
+            ai = agent.get_state(config).values["messages"][-1]
+            denied = _apply_tool_decision(agent, config, ai, decision)
+            if denied:
+                assistant["content"] += f"\n（已跳过用户拒绝的工具：{', '.join(denied)}）"
+            continue
+
+        if not cancelled:
+            messages.append(assistant)
+            store.save_messages(cid, messages)
+            store.touch(cid)
+            meta = store.get(cid)
+            if meta and (not meta.get("title") or meta.get("title") == "新对话"):
+                store.rename(cid, content[:30])
+        if ws:
+            await ws.send_json({"type": "message_end"})
         return {"assistant": assistant}
     finally:
         workspace.current_workspace.reset(token)
+        if conn:
+            conn.busy = False
+
+
+def _apply_tool_decision(agent, config, ai, decision: dict) -> None:
+    """按用户决策修改当前 AI 消息的 tool_calls 并续跑。
+
+    - approve 的工具保留（可带编辑后的 args），随后照常执行；
+    - deny 的工具直接从 tool_calls 中移除，不再执行（不注入 ToolMessage：
+      否则 ReAct 的工具节点会认为该调用已得到结果而跳过其余工具）。
+    返回的被拒绝工具名用于前端提示。
+    """
+    action = decision.get("action", "submit")  # submit | deny | cancel
+    calls = {c.get("id"): c for c in decision.get("calls", [])}
+    default = "approve" if action == "submit" else "deny"
+
+    new_tcs = []
+    denied_names: list[str] = []
+    for tc in (ai.tool_calls or []):
+        d = calls.get(tc["id"])
+        approve = (d["action"] == "approve") if d else (default == "approve")
+        if approve:
+            if d and "args" in d:
+                t = dict(tc)
+                t["args"] = d["args"]
+                new_tcs.append(t)
+            else:
+                new_tcs.append(tc)
+        else:
+            denied_names.append(tc["name"])
+    new_ai = ai.model_copy(update={"tool_calls": new_tcs, "invalid_tool_calls": []})
+    agent.update_state(config, {"messages": [new_ai]})
+    return denied_names
 
 
 # ---------- 工具函数 ----------
