@@ -362,7 +362,7 @@ async def run_turn(cid: str, content: str, conn: Conn | None):
 
             # astream_events 遇中断不会抛异常，需通过状态机判定是否停在 tools 前
             if not interrupted:
-                st = agent.get_state(config)
+                st = await agent.aget_state(config)
                 if st.next and "tools" in st.next:
                     interrupted = True
 
@@ -373,7 +373,7 @@ async def run_turn(cid: str, content: str, conn: Conn | None):
             if mode != "confirm" or not ws:
                 continue  # 自动模式：直接 resume 执行
 
-            st = agent.get_state(config)
+            st = await agent.aget_state(config)
             ai = st.values["messages"][-1]
             pending = [
                 {"id": tc["id"], "name": tc["name"], "args": tc["args"]}
@@ -399,8 +399,8 @@ async def run_turn(cid: str, content: str, conn: Conn | None):
                 decision = {"action": "deny"}  # 取消等价于拒绝本轮全部工具
 
             # 依据决策改写本轮 tool_calls（拒绝的工具不会执行），然后续跑
-            ai = agent.get_state(config).values["messages"][-1]
-            denied = _apply_tool_decision(agent, config, ai, decision)
+            ai = (await agent.aget_state(config)).values["messages"][-1]
+            denied = await _apply_tool_decision(agent, config, ai, decision)
             if denied:
                 assistant["content"] += f"\n（已跳过用户拒绝的工具：{', '.join(denied)}）"
             continue
@@ -421,7 +421,7 @@ async def run_turn(cid: str, content: str, conn: Conn | None):
             conn.busy = False
 
 
-def _apply_tool_decision(agent, config, ai, decision: dict) -> None:
+async def _apply_tool_decision(agent, config, ai, decision: dict) -> list[str]:
     """按用户决策修改当前 AI 消息的 tool_calls 并续跑。
 
     - approve 的工具保留（可带编辑后的 args），随后照常执行；
@@ -448,7 +448,7 @@ def _apply_tool_decision(agent, config, ai, decision: dict) -> None:
         else:
             denied_names.append(tc["name"])
     new_ai = ai.model_copy(update={"tool_calls": new_tcs, "invalid_tool_calls": []})
-    agent.update_state(config, {"messages": [new_ai]})
+    await agent.aupdate_state(config, {"messages": [new_ai]})
     return denied_names
 
 
