@@ -1,4 +1,7 @@
-// 路由配置：/login 登录页、/ 主界面。
+// 路由配置：/login 登录页，其余为工作台各功能页。
+//
+// 布局约定：Shell.vue 承载「顶部工具栏 + 左侧图标导航」，
+// 各功能页作为其子路由渲染进内容区，因此切换导航不会重建外壳。
 //
 // 注意 base 用 '/' 而非 import.meta.env.BASE_URL：
 // 生产构建的 BASE_URL 是 '/static/'（用于让 JS/CSS 资源走 StaticFiles 挂载），
@@ -16,8 +19,16 @@ const routes: RouteRecordRaw[] = [
   },
   {
     path: '/',
-    name: 'home',
-    component: () => import('./views/Home.vue'),
+    component: () => import('./views/Shell.vue'),
+    children: [
+      { path: '', name: 'assistant', component: () => import('./views/Home.vue') },
+      { path: 'projects', name: 'projects', component: () => import('./views/Projects.vue') },
+      { path: 'experts', name: 'experts', component: () => import('./views/Experts.vue') },
+      { path: 'automation', name: 'automation', component: () => import('./views/Automation.vue') },
+      { path: 'library', name: 'library', component: () => import('./views/Library.vue') },
+      { path: 'inspiration', name: 'inspiration', component: () => import('./views/Inspiration.vue') },
+      { path: 'settings', name: 'settings', component: () => import('./views/Settings.vue') },
+    ],
   },
   // 兜底：未知路径回主界面（未登录时会被守卫转到 /login）
   { path: '/:pathMatch(.*)*', redirect: '/' },

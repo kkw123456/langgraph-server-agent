@@ -16,10 +16,29 @@
 - **技能管理**：内置技能可启停；支持通过 `@tool` 代码动态创建自定义技能、删除、重载；启用的技能会自动注入系统提示词与可用工具集。
 - **会话级隔离工作目录**：每个会话拥有独立目录 `data/workspaces/{cid}`，互不串扰；工具（如 `run_python`）在隔离目录内执行，产物只落在该会话空间。
 - **Web 文件浏览**：右侧面板可浏览当前会话工作目录（目录树、文本预览、二进制下载、返回上级、刷新）。
-- **三区布局 + 可收起/全屏面板**：左侧会话栏（顶部「新建对话」）、中间主区（顶部菜单：对话 / 技能管理）、右侧文件与预览面板。右侧面板支持 **拖拽调宽、收起到图标条、完全收起、全屏** 四种状态。
-- **独立技能管理页**：顶部菜单「技能管理」进入专门页面，支持关键词搜索、分类筛选、卡片式展示（开关启停 / 删除自定义 / 重载 / 新建）。
+
+### 工作台形态（仿 WorkBuddy 四区布局）
+
+界面按「顶部工具栏 + 左侧竖向图标导航 + 内容区」组织，图标导航的每个入口都是**可用真页面**，而非样式占位：
+
+| 区域 / 入口 | 说明 |
+|---|---|
+| **顶部工具栏** | 品牌标识、**模型切换**（运行时热切换，下一个对话轮次生效）、任务/项目/资料搜索、连接状态、设置、当前用户与退出登录 |
+| **左侧图标导航** | 新建任务、助理、项目、专家·技能·连接器、自动化、更多；底部：资料库、灵感、连接器 |
+| **中间对话区** | 会话列表 + 消息流 + 输入区（左下 `+` 附件入口、右下模型切换）。空态含 **场景 tab**（日常办公 / 代码开发 / 设计创意）与 **快捷入口卡片**，点击即新建会话并投递指令 |
+| **右侧结果面板** | **产物 / 所有文件 / 变更预览 / 文件预览** 四个标签；支持拖拽调宽、收起到图标条、完全收起、全屏四态 |
+
+| 功能页 | 能力 |
+|---|---|
+| **项目** | 项目 CRUD（名称 / 描述 / 颜色），把会话加入或移出项目，点击会话直接跳转对话 |
+| **专家 · 技能 · 连接器** | 技能页（搜索 / 分类 / 启停 / 新建 / 删除 / 重载）与连接器清单 |
+| **自动化** | 定时任务 CRUD：支持 `每天 / 每周一 / 每小时 / 仅手动`，由后端调度循环驱动；「立即运行」会新建会话并跳转 |
+| **资料库** | 笔记 / 链接 / 文件条目的 CRUD 与全文搜索（标题 + 内容 + 标签），可一键「带进对话」 |
+| **灵感** | 提示词模板集合（量化 / 研究 / 工程 / 效率），点击直接带进对话 |
+| **设置** | 模型切换、工具权限模式、运行时统计（技能数、会话/项目/自动化/资料计数）、认证状态、退出登录 |
+
 - **现代化图标**：全站图标统一使用主流图标库 [lucide](https://lucide.dev/)（`lucide-vue-next`），并采用亮色主题与流式「打字机」光标效果。
-- **Naive UI 组件库**：界面基于 [Naive UI](https://www.naiveui.com/)（`naive-ui`）构建——按钮、输入框、弹窗、开关、标签页、卡片、列表、消息提示等均使用其组件，配合 `n-config-provider` 统一亮色主题与中文语言包。
+- **Naive UI 组件库**：界面基于 [Naive UI](https://www.naiveui.com/)（`naive-ui`）构建——按钮、输入框、弹窗、开关、标签页、卡片、列表、时间选择器等均使用其组件，配合 `n-config-provider` 统一亮色主题与中文语言包。
 
 ---
 
@@ -38,9 +57,10 @@
 
 ```
 .
-├── server.py                 # FastAPI 入口：路由、WebSocket、文件端点、会话工作目录绑定
+├── server.py                 # FastAPI 入口：路由、WebSocket、文件端点、自动化调度循环
 ├── config.py                 # 环境变量配置
 ├── workspace.py              # 会话级隔离工作目录 + ContextVar 上下文
+├── workbench_store.py        # 工作台扩展存储（项目 / 自动化 / 资料库）
 ├── requirements.txt          # Python 依赖
 ├── run.sh                    # 一键安装依赖并启动后端
 ├── agent/                    # Agent 构建（模型、系统提示词、工具聚合）
@@ -53,9 +73,18 @@
 ├── vite.config.ts            # base: '/static/'，dev 代理 /api、/ws → :8000
 ├── tsconfig.json
 ├── package.json
-├── src/                      # 前端源码（main.ts、router.ts、store.ts、auth.ts、api.ts、types.ts）
-│   ├── views/                # 路由页面（Login.vue 登录页、Home.vue 主界面）
-│   └── components/           # 复用组件（ChatWindow、RightPanel 等）
+├── src/                      # 前端源码（main.ts、router.ts、store.ts、workbench.ts、auth.ts、api.ts、types.ts）
+│   ├── views/                # 路由页面
+│   │   ├── Login.vue         # 登录页
+│   │   ├── Shell.vue         # 应用外壳（顶部工具栏 + 左侧图标导航）
+│   │   ├── Home.vue          # 对话页（会话列表 + 聊天 + 右侧结果面板）
+│   │   ├── Projects.vue      # 项目页
+│   │   ├── Experts.vue       # 专家 · 技能 · 连接器页
+│   │   ├── Automation.vue    # 自动化页
+│   │   ├── Library.vue       # 资料库页
+│   │   ├── Inspiration.vue   # 灵感页
+│   │   └── Settings.vue      # 设置页
+│   └── components/           # 复用组件（ChatWindow、FilePanel、SkillManager、ToolConfirm 等）
 └── static/                   # 生产构建产物（由 FastAPI 的 StaticFiles 直接托管）
 ```
 
@@ -202,7 +231,9 @@ tail -f /var/log/langgraph-agent.log  # 应用日志
 | `POST` | `/api/auth/logout` | 退出登录，清除 Cookie |
 | `GET` | `/api/auth/check` | 查询登录态，返回 `{"authenticated","username","enabled"}` |
 
-> 除上表与 `/`、`/static/*` 外，其余接口均需登录；未登录时 REST 返回 `401`，WebSocket 以 `4401` 关闭。
+> 除上表与 `/login`、`/`、`/static/*` 外，其余接口均需登录；未登录时 REST 返回 `401`，WebSocket 以 `4401` 关闭。
+>
+> `/projects`、`/automation` 等前端路由由 Vue Router 接管：服务端在**所有路由注册完毕之后**追加一条 `GET /{full_path:path}` 回退到同一入口 HTML，并显式排除 `api/`、`static/`、`ws/` 前缀，使这些地址可直接访问或刷新。
 
 ### 对话（Conversations）
 | 方法 | 路径 | 说明 |
@@ -224,6 +255,45 @@ tail -f /var/log/langgraph-agent.log  # 应用日志
 | `POST` | `/api/skills/custom` | 创建自定义技能，body: `{"name","description","code"}`（`code` 含 `@tool` 函数） |
 | `DELETE` | `/api/skills/{sid}` | 删除自定义技能 |
 | `POST` | `/api/skills/reload` | 重新扫描并加载技能 |
+
+### 项目空间（Projects）
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| `GET` | `/api/projects` | 列出全部项目（含 `conv_count` 与 `conv_ids`） |
+| `POST` | `/api/projects` | 新建项目，body: `{"name","description","color"}` |
+| `PATCH` | `/api/projects/{pid}` | 更新项目（名称 / 描述 / 颜色） |
+| `DELETE` | `/api/projects/{pid}` | 删除项目（仅解除关联，**不删除会话本身**） |
+| `POST` | `/api/projects/{pid}/conversations` | 把会话加入项目，body: `{"cid"}` |
+| `DELETE` | `/api/projects/{pid}/conversations/{cid}` | 把会话移出项目 |
+
+### 自动化（Automations）
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| `GET` | `/api/automations` | 列出全部自动化任务 |
+| `POST` | `/api/automations` | 新建任务，body: `{"name","prompt","schedule","at_time","enabled"}` |
+| `PATCH` | `/api/automations/{aid}` | 更新任务（含启停 `enabled`） |
+| `DELETE` | `/api/automations/{aid}` | 删除任务 |
+| `POST` | `/api/automations/{aid}/run` | 手动触发一次，返回 `{"ok","cid"}`（新建的会话 id） |
+
+`schedule` 取值 `daily` / `weekly`（每周一）/ `hourly` / `manual`；`at_time` 为 `HH:MM`。
+调度由 `server.py` 中 `lifespan` 启动的 `_automation_scheduler()` 驱动，每 60 秒轮询，
+用 `last_run_at` 去重以保证当期只触发一次；`manual` 不参与调度。
+
+### 资料库（Library）
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| `GET` | `/api/library?q=` | 列出条目；`q` 对 标题 / 内容 / 标签 做模糊搜索 |
+| `POST` | `/api/library` | 新建条目，body: `{"title","content","kind","tags"}` |
+| `PATCH` | `/api/library/{iid}` | 更新条目 |
+| `DELETE` | `/api/library/{iid}` | 删除条目 |
+
+`kind` 取值 `note` / `link` / `file`；`tags` 为逗号分隔字符串。
+
+### 运行时（Runtime）
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| `GET` | `/api/runtime` | 当前模型、可选模型、推理地址、技能与各域计数（设置页展示） |
+| `POST` | `/api/runtime/model` | 切换模型，body: `{"model"}`；模型名需在 `ALLOWED_MODELS` 内，切换后清空 Agent 缓存，**下一个对话轮次生效** |
 
 ### 工作目录 / 文件
 | 方法 | 路径 | 说明 |
@@ -311,7 +381,7 @@ def my_tool(query: str) -> str:
 
 | 文件 | 用途 | 管理方 |
 |---|---|---|
-| `data/app.db` | 会话元数据 + 消息历史（`conversations` / `messages` 两张表） | `conversation/store.py` |
+| `data/app.db` | 会话元数据 + 消息历史，以及工作台的 项目 / 自动化 / 资料库 | `conversation/store.py`、`workbench_store.py` |
 | `data/checkpoints.db` | LangGraph 对话状态检查点，支撑多轮上下文与工具审批中断 | `AsyncSqliteSaver` |
 | `data/workspaces/{cid}/` | 会话隔离工作目录（普通文件，非数据库） | `workspace.py` |
 
@@ -321,10 +391,19 @@ def my_tool(query: str) -> str:
 conversations(id TEXT PK, title TEXT, created_at REAL, updated_at REAL)
 messages(id INTEGER PK AUTOINCREMENT, cid TEXT FK→conversations.id ON DELETE CASCADE,
          seq INTEGER, role TEXT, content TEXT, tool_calls TEXT /* JSON */)
+
+-- workbench_store.py（与上表共库、互不依赖）
+projects(id TEXT PK, name TEXT, description TEXT, color TEXT, created_at REAL, updated_at REAL)
+project_conversations(project_id TEXT FK→projects.id ON DELETE CASCADE, cid TEXT, added_at REAL,
+                      PRIMARY KEY (project_id, cid))
+automations(id TEXT PK, name TEXT, prompt TEXT, schedule TEXT, at_time TEXT, enabled INTEGER,
+            last_run_at REAL, last_status TEXT, run_count INTEGER, created_at REAL)
+library_items(id TEXT PK, title TEXT, kind TEXT, content TEXT, tags TEXT,
+              created_at REAL, updated_at REAL)
 ```
 
 - 消息按 `seq` 排序，`tool_calls` 以 JSON 文本存储；`save_messages` 在单事务内全量覆盖写入，保证原子性。
-- 删除会话通过外键级联清理消息，不留孤儿行。
+- 删除会话通过外键级联清理消息，不留孤儿行；删除项目会级联清理 `project_conversations` 关联（会话本身保留）。
 - 连接按线程惰性创建并复用（`sqlite3` 连接不可跨线程共享），启用 WAL 模式提升并发表现；所有 SQL 参数化绑定。
 
 **从旧版 JSON 数据结构迁移**（v1 → v2）

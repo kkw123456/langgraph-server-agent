@@ -13,6 +13,7 @@ interface AppState {
   live: Message | null
   mode: ToolMode            // 工具调用权限模式
   pendingTool: PendingToolCall[] | null  // 待用户审批的工具调用（确认模式）
+  searchKw: string          // 顶部工具栏的任务搜索关键字
 }
 
 // 轻量级全局 store：单一响应式 state + 动作函数。
@@ -27,6 +28,7 @@ export const state = reactive<AppState>({
   live: null, // 正在流式输出的助手消息
   mode: 'auto',
   pendingTool: null,
+  searchKw: '',
 })
 
 let ws: WebSocket | null = null
@@ -96,6 +98,22 @@ function handleEvent(msg: WsEvent): void {
 // ===================== 会话 =====================
 export async function loadConvs(): Promise<void> {
   state.convs = await api.get<Conversation[]>('/api/conversations')
+}
+
+/** 按顶部工具栏的搜索关键字过滤后的会话列表。 */
+export function filteredConvs(): Conversation[] {
+  const kw = state.searchKw.trim().toLowerCase()
+  if (!kw) return state.convs
+  return state.convs.filter((c) => (c.title || '').toLowerCase().includes(kw))
+}
+
+/** 在已有会话中发送一条消息（供首页快捷卡片「带着内容新建会话」使用）。 */
+export async function startWith(text: string): Promise<string | null> {
+  const t = (text || '').trim()
+  if (!t) return null
+  await newChat()
+  await sendText(t)
+  return state.current
 }
 
 export async function selectConv(id: string): Promise<void> {

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+// 技能管理页：按分类分组展示所有技能，支持搜索、启停、重载、新建、删除。
 import { computed, ref } from 'vue'
 import { NInput, NTag, NCard, NSwitch, NButton, NEmpty, NIcon } from 'naive-ui'
 import { Puzzle, RefreshCw, Plus, Trash2, Search, Package } from 'lucide-vue-next'

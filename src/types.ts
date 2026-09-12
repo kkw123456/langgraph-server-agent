@@ -1,4 +1,5 @@
-// 共享领域类型：会话、消息、工具调用、技能、WebSocket 事件。
+// 共享领域类型：会话、消息、工具调用、技能、WebSocket 事件，
+// 以及工作台扩展域（项目空间 / 自动化 / 资料库 / 运行时）。
 
 export interface ToolCall {
   name: string
@@ -84,3 +85,60 @@ export interface FileContentResponse {
   error?: string
 }
 export type FileResponse = FileDirResponse | FileContentResponse
+
+// ===================== 工作台扩展域 =====================
+
+// 项目空间：把多个会话组织在一起
+export interface Project {
+  id: string
+  name: string
+  description: string
+  color: string
+  created_at: number
+  updated_at: number
+  conv_count: number
+  conv_ids: string[]
+}
+
+// 自动化任务：定时或手动触发的指令
+export type AutoSchedule = 'daily' | 'weekly' | 'hourly' | 'manual'
+
+export interface Automation {
+  id: string
+  name: string
+  prompt: string
+  schedule: AutoSchedule
+  at_time: string
+  enabled: boolean
+  last_run_at: number | null
+  last_status: string | null
+  run_count: number
+  created_at: number
+}
+
+// 资料库条目：笔记 / 链接 / 文件引用
+export type LibraryKind = 'note' | 'link' | 'file'
+
+export interface LibraryItem {
+  id: string
+  title: string
+  kind: LibraryKind
+  content: string
+  tags: string
+  created_at: number
+  updated_at: number
+}
+
+// 运行时信息：可选模型与当前模型，以及各域统计（用于设置页展示）
+export interface RuntimeInfo {
+  model: string
+  base_url?: string
+  models: string[]
+  temperature?: number
+  skills_enabled: number
+  skills_total: number
+  conv_count?: number
+  project_count?: number
+  automation_count?: number
+  library_count?: number
+}

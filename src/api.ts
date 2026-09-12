@@ -1,6 +1,17 @@
 // 通用 REST 封装，带泛型以便调用方获得强类型返回值。
+//
+// 统一处理两类易错点：
+// - 401：登录态失效时广播 lg:unauthorized 事件，由 App 层统一跳登录页；
+// - 非 JSON 响应：退化为空对象，避免调用方在 catch 里再包一层。
 async function toJson<T>(r: Response): Promise<T> {
-  return (await r.json()) as T
+  if (r.status === 401 && !location.pathname.startsWith('/login')) {
+    window.dispatchEvent(new CustomEvent('lg:unauthorized'))
+  }
+  try {
+    return (await r.json()) as T
+  } catch (e) {
+    return {} as T
+  }
 }
 
 export const api = {

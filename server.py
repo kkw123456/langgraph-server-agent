@@ -8,6 +8,7 @@
 """
 import os
 import json
+import time
 import asyncio
 from contextlib import asynccontextmanager
 
@@ -22,14 +23,25 @@ import auth as authmod
 from skills.registry import SkillRegistry
 from agent.builder import AgentManager
 from conversation.store import ConversationStore
+from workbench_store import WorkbenchStore
 import workspace
 
 # 确认模式下等待用户决策的最长等待时间（秒），超时视为全部拒绝
 MODE_TIMEOUT = 600
 
+# 顶部工具栏可切换的模型（值需与所选服务商的模型名一致）
+ALLOWED_MODELS = [
+    "ark-code-latest",
+    "deepseek-chat",
+    "deepseek-reasoner",
+    "gpt-4o-mini",
+    "gpt-4o",
+]
+
 # ---- 全局单例 ----
 registry = SkillRegistry(config.DATA_DIR)
 store = ConversationStore(config.DATA_DIR)
+workbench = WorkbenchStore(config.DATA_DIR)
 agent_manager = None  # 在 lifespan 中初始化（SqliteSaver 为异步上下文）
 
 INDEX_HTML = os.path.join("static", "index.html")  # Vue SPA 入口
@@ -76,6 +88,81 @@ class Conn:
         self.busy = False
 
 
+async def _automation_scheduler():
+    """自动化任务的调度循环。
+
+    - hourly：距上次运行满 1 小时即触发。
+    - daily ：每天 at_time（本地时区）触发一次。
+    - weekly：每周一 at_time 触发一次。
+    - manual：只能由用户手动触发，不参与调度。
+
+    每 60 秒轮询一次；同一任务当日/当期只跑一次（用 last_run_at 去重）。
+    任何一次触发失败都不会中断循环。
+    """
+    while True:
+        try:
+            now = time.time()
+            lt = time.localtime(now)
+            for a in workbench.list_automations():
+                if not a.get("enabled"):
+                    continue
+                sched = (a.get("schedule") or "daily").lower()
+                if sched == "manual":
+                    continue
+                last = a.get("last_run_at") or 0
+                hh, mm = _parse_at_time(a.get("at_time"))
+                due = False
+                if sched == "hourly":
+                    due = now - last >= 3600
+                elif sched == "daily":
+                    # 今天的目标时刻已过，且今天还没跑过
+                    target = time.mktime(
+                        (lt.tm_year, lt.tm_mon, lt.tm_mday, hh, mm, 0, 0, 0, -1)
+                    )
+                    due = now >= target and last < target
+                elif sched == "weekly":
+                    target = time.mktime(
+                        (lt.tm_year, lt.tm_mon, lt.tm_mday, hh, mm, 0, 0, 0, -1)
+                    )
+                    # 周一为一周起点（tm_wday=0）
+                    due = lt.tm_wday == 0 and now >= target and last < target
+                if due:
+                    await _fire_automation(a)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # 调度器必须自身健壮
+            print(f"[scheduler] 调度循环异常：{e}")
+        await asyncio.sleep(60)
+
+
+def _parse_at_time(s: str | None) -> tuple[int, int]:
+    """把 "HH:MM" 解析为 (时, 分)，非法输入回退到 09:00。"""
+    try:
+        hh, mm = (s or "09:00").split(":")
+        return max(0, min(23, int(hh))), max(0, min(59, int(mm)))
+    except Exception:
+        return 9, 0
+
+
+async def _fire_automation(a: dict) -> None:
+    """触发一次自动化任务：新建会话 + 后台执行指令。"""
+    if agent_manager is None:
+        return
+    aid = a["id"]
+    try:
+        conv = store.create(f"自动化 · {a['name']}")
+        workspace.get_workspace(conv["id"])
+        asyncio.create_task(run_turn(conv["id"], a["prompt"], None))
+        workbench.update_automation(
+            aid, last_run_at=time.time(), last_status="running",
+            run_count=(a.get("run_count") or 0) + 1,
+        )
+        print(f"[scheduler] 已触发自动化「{a['name']}」→ 会话 {conv['id']}")
+    except Exception as e:
+        workbench.update_automation(aid, last_run_at=time.time(), last_status="failed")
+        print(f"[scheduler] 自动化「{a.get('name')}」触发失败：{e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     os.makedirs(config.DATA_DIR, exist_ok=True)
@@ -83,7 +170,15 @@ async def lifespan(app: FastAPI):
     async with AsyncSqliteSaver.from_conn_string(config.DB_PATH) as checkpointer:
         global agent_manager
         agent_manager = AgentManager(checkpointer, registry)
-        yield
+        scheduler = asyncio.create_task(_automation_scheduler())
+        try:
+            yield
+        finally:
+            scheduler.cancel()
+            try:
+                await scheduler
+            except (asyncio.CancelledError, Exception):
+                pass
 
 
 app = FastAPI(title="LangGraph 服务端 Agent", lifespan=lifespan)
@@ -213,6 +308,165 @@ def api_remove(sid: str):
 @app.post("/api/skills/reload", dependencies=[Depends(require_auth)])
 def api_reload():
     return {"ok": True, "skills": registry.reload()}
+
+
+# ===================== 工作台：项目空间 =====================
+@app.get("/api/projects", dependencies=[Depends(require_auth)])
+def api_project_list():
+    return workbench.list_projects()
+
+
+@app.post("/api/projects", dependencies=[Depends(require_auth)])
+async def api_project_create(body: dict = None):
+    b = body or {}
+    name = (b.get("name") or "").strip()
+    if not name:
+        return {"ok": False, "error": "项目名称不能为空"}
+    return workbench.create_project(
+        name, b.get("description", ""), b.get("color", "#2f6feb")
+    )
+
+
+@app.patch("/api/projects/{pid}", dependencies=[Depends(require_auth)])
+async def api_project_update(pid: str, body: dict):
+    ok = workbench.update_project(
+        pid, body.get("name"), body.get("description"), body.get("color")
+    )
+    return {"ok": ok}
+
+
+@app.delete("/api/projects/{pid}", dependencies=[Depends(require_auth)])
+def api_project_delete(pid: str):
+    return {"ok": workbench.delete_project(pid)}
+
+
+@app.post("/api/projects/{pid}/conversations", dependencies=[Depends(require_auth)])
+async def api_project_add_conv(pid: str, body: dict):
+    cid = body.get("cid", "")
+    if not store.get(cid):
+        return {"ok": False, "error": "会话不存在"}
+    return {"ok": workbench.add_conv_to_project(pid, cid)}
+
+
+@app.delete("/api/projects/{pid}/conversations/{cid}", dependencies=[Depends(require_auth)])
+def api_project_del_conv(pid: str, cid: str):
+    return {"ok": workbench.remove_conv_from_project(pid, cid)}
+
+
+# ===================== 工作台：自动化 =====================
+@app.get("/api/automations", dependencies=[Depends(require_auth)])
+def api_auto_list():
+    return workbench.list_automations()
+
+
+@app.post("/api/automations", dependencies=[Depends(require_auth)])
+async def api_auto_create(body: dict = None):
+    b = body or {}
+    name = (b.get("name") or "").strip()
+    prompt = (b.get("prompt") or "").strip()
+    if not name or not prompt:
+        return {"ok": False, "error": "任务名称与指令不能为空"}
+    return workbench.create_automation(
+        name, prompt, b.get("schedule", "daily"),
+        b.get("at_time", "09:00"), b.get("enabled", True),
+    )
+
+
+@app.patch("/api/automations/{aid}", dependencies=[Depends(require_auth)])
+async def api_auto_update(aid: str, body: dict):
+    ok = workbench.update_automation(
+        aid,
+        name=body.get("name"), prompt=body.get("prompt"),
+        schedule=body.get("schedule"), at_time=body.get("at_time"),
+        enabled=body.get("enabled"),
+    )
+    return {"ok": ok}
+
+
+@app.delete("/api/automations/{aid}", dependencies=[Depends(require_auth)])
+def api_auto_delete(aid: str):
+    return {"ok": workbench.delete_automation(aid)}
+
+
+@app.post("/api/automations/{aid}/run", dependencies=[Depends(require_auth)])
+async def api_auto_run(aid: str):
+    """手动触发一次自动化：新建会话并投递该指令，返回会话 id 供前端跳转。"""
+    a = workbench.get_automation(aid)
+    if not a:
+        return {"ok": False, "error": "自动化任务不存在"}
+    conv = store.create(f"自动化 · {a['name']}")
+    workspace.get_workspace(conv["id"])
+    # 后台执行，避免请求阻塞（执行耗时可能很长）
+    asyncio.create_task(run_turn(conv["id"], a["prompt"], None))
+    workbench.update_automation(
+        aid, last_run_at=time.time(), last_status="running",
+        run_count=(a.get("run_count") or 0) + 1,
+    )
+    return {"ok": True, "cid": conv["id"]}
+
+
+# ===================== 工作台：资料库 =====================
+@app.get("/api/library", dependencies=[Depends(require_auth)])
+def api_lib_list(q: str = ""):
+    return workbench.list_library(q)
+
+
+@app.post("/api/library", dependencies=[Depends(require_auth)])
+async def api_lib_create(body: dict = None):
+    b = body or {}
+    title = (b.get("title") or "").strip()
+    if not title:
+        return {"ok": False, "error": "标题不能为空"}
+    return workbench.create_library_item(
+        title, b.get("content", ""), b.get("kind", "note"), b.get("tags", "")
+    )
+
+
+@app.patch("/api/library/{iid}", dependencies=[Depends(require_auth)])
+async def api_lib_update(iid: str, body: dict):
+    ok = workbench.update_library_item(
+        iid, title=body.get("title"), content=body.get("content"),
+        kind=body.get("kind"), tags=body.get("tags"),
+    )
+    return {"ok": ok}
+
+
+@app.delete("/api/library/{iid}", dependencies=[Depends(require_auth)])
+def api_lib_delete(iid: str):
+    return {"ok": workbench.delete_library_item(iid)}
+
+
+# ===================== 工作台：运行时信息 =====================
+@app.get("/api/runtime", dependencies=[Depends(require_auth)])
+def api_runtime():
+    """顶部工具栏所需：当前模型、可用模型列表、技能统计等。"""
+    skills = registry.list()
+    return {
+        "model": agent_manager.model_name if agent_manager else config.MODEL,
+        "base_url": config.OPENAI_BASE_URL,
+        "models": ALLOWED_MODELS,
+        "temperature": config.TEMPERATURE,
+        "skills_total": len(skills),
+        "skills_enabled": sum(1 for s in skills if s.get("enabled")),
+        "conv_count": len(store.list()),
+        "project_count": len(workbench.list_projects()),
+        "automation_count": len(workbench.list_automations()),
+        "library_count": len(workbench.list_library()),
+    }
+
+
+@app.post("/api/runtime/model", dependencies=[Depends(require_auth)])
+async def api_set_model(body: dict):
+    """切换当前使用的模型（仅影响之后新建的对话轮次）。"""
+    name = (body.get("model") or "").strip()
+    if not name:
+        return {"ok": False, "error": "模型名不能为空"}
+    if ALLOWED_MODELS and name not in ALLOWED_MODELS:
+        return {"ok": False, "error": f"不支持的模型：{name}"}
+    if agent_manager is None:
+        return {"ok": False, "error": "Agent 尚未初始化"}
+    agent_manager.set_model(name)
+    return {"ok": True, "model": name}
 
 
 # ===================== 会话管理 =====================
@@ -593,6 +847,22 @@ def _attach_output(assistant, out):
             return
     if assistant["tool_calls"]:
         assistant["tool_calls"][-1]["output"] = out
+
+
+# ===================== SPA 前端路由回退 =====================
+# /projects、/automation 等前端路由由 Vue Router 接管，服务端只需返回同一个
+# 入口 HTML；否则直接访问或刷新这些地址会得到 404。
+#
+# 必须注册在文件最末尾：FastAPI 按注册顺序匹配，此路由带 {full_path:path}
+# 通配，若提前注册会吞掉其后声明的所有 /api、/ws 路由。
+# 这里再显式排除三类前缀，确保接口与静态资源的 404 语义不被改写。
+@app.get("/{full_path:path}", response_class=HTMLResponse)
+def spa_fallback(full_path: str):
+    if full_path.startswith(("api/", "static/", "ws/")):
+        return JSONResponse({"detail": "Not Found"}, status_code=404)
+    if not os.path.exists(INDEX_HTML):
+        return HTMLResponse("<h3>前端未构建：请先执行 npm run build</h3>", status_code=500)
+    return FileResponse(INDEX_HTML)
 
 
 if __name__ == "__main__":

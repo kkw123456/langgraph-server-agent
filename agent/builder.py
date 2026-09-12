@@ -1,4 +1,7 @@
-"""LangGraph Agent 构建器：根据当前启用的技能动态编译 ReAct 图。"""
+"""LangGraph Agent 构建器：根据当前启用的技能动态编译 ReAct 图。
+
+支持运行时切换模型：``set_model()`` 后缓存失效，下次取用会按新模型重建图。
+"""
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
 
@@ -12,6 +15,9 @@ class AgentManager:
         self.registry = registry
         self._cache: dict = {}
         self._cache_key = None
+        # 当前模型（可在运行时切换，初值取 .env 的 MODEL）
+        self.model_name = MODEL
+        self.temperature = TEMPERATURE
 
     def _model(self) -> ChatOpenAI:
         if not OPENAI_API_KEY:
@@ -20,12 +26,18 @@ class AgentManager:
                 "可通过 OPENAI_BASE_URL 指向 DeepSeek / 本地 Ollama 等）。"
             )
         return ChatOpenAI(
-            model=MODEL,
+            model=self.model_name,
             api_key=OPENAI_API_KEY,
             base_url=OPENAI_BASE_URL,
-            temperature=TEMPERATURE,
+            temperature=self.temperature,
             streaming=True,
         )
+
+    def set_model(self, name: str) -> None:
+        """切换模型并让已编译的图失效（下次 get_agent 时重建）。"""
+        self.model_name = name
+        self._cache.clear()
+        self._cache_key = None
 
     def _system_prompt(self) -> str:
         lines = [
@@ -44,8 +56,8 @@ class AgentManager:
         return "\n".join(lines)
 
     def get_agent(self):
-        """按启用技能集合缓存编译好的图，技能变动时才重新编译。"""
-        key = frozenset(self.registry.enabled_ids())
+        """按「启用技能集合 + 当前模型」缓存编译好的图，任一变动即重建。"""
+        key = (frozenset(self.registry.enabled_ids()), self.model_name)
         if self._cache_key != key:
             tools = self.registry.enabled_tools()
             agent = create_react_agent(

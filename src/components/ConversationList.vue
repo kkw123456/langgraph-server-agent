@@ -27,6 +27,6 @@ defineEmits<{ select: [id: string]; delete: [id: string] }>()
         删除该会话？
       </NPopconfirm>
     </div>
-    <NEmpty v-if="!convs.length" class="conv-empty" size="small" description="暂无会话" />
+    <NEmpty v-if="!convs.length" class="conv-empty" size="small" description="暂无匹配的会话" />
   </div>
 </template>
