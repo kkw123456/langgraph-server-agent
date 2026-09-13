@@ -81,7 +81,7 @@ async def main() -> int:
         await page.goto(f"{BASE}/", wait_until="networkidle")
         await page.wait_for_timeout(500)
         # 打开刚建的会话
-        await page.locator(".conv", has_text="UX验证").first.click()
+        await page.locator(".cs-item", has_text="UX验证").first.click()
         await page.wait_for_timeout(600)
         await send_and_wait_start(page, "请调用计算器工具计算 137*24-88，然后把结果用一个二级标题和一行表格（列：表达式|结果）展示。")
         # 等待气泡应已出现（发送后立刻）
@@ -124,7 +124,7 @@ async def main() -> int:
         )
         await page.reload(wait_until="networkidle")
         await page.wait_for_timeout(600)
-        await page.locator(".conv", has_text="停止验证").first.click()
+        await page.locator(".cs-item", has_text="停止验证").first.click()
         await page.wait_for_timeout(600)
         await send_and_wait_start(page, "请调用 run_python 工具执行 time.sleep(14)，然后告诉我执行完毕。不要解释，直接执行。")
         # 等停止按钮出现（running 状态）或等待气泡
@@ -153,7 +153,7 @@ async def main() -> int:
         )
         await page.reload(wait_until="networkidle")
         await page.wait_for_timeout(600)
-        await page.locator(".conv", has_text="续播验证").first.click()
+        await page.locator(".cs-item", has_text="续播验证").first.click()
         await page.wait_for_timeout(600)
         await send_and_wait_start(
             page,
@@ -162,7 +162,7 @@ async def main() -> int:
         await page.wait_for_timeout(2500)  # 让流式输出一些内容
         before_len = len(await page.locator(".md").last.inner_text()) if await page.locator(".md").count() else 0
         # 运行中徽标：选中会话后列表应标注 running
-        badge = await page.locator(".conv.active .conv-running, .conv .conv-running").count()
+        badge = await page.locator(".cs-item.active .cs-run, .cs-item .cs-run").count()
         if not badge:
             fails.append(f"{tag} 流式进行中会话列表缺少「运行中」徽标")
         await page.reload(wait_until="networkidle")  # 流式中刷新

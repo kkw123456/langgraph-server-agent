@@ -212,6 +212,16 @@ export async function deleteConv(id: string): Promise<void> {
   await loadConvs()
 }
 
+/** 重命名会话：PATCH 后同步本地列表与当前标题，避免整表刷新闪烁。 */
+export async function renameConv(id: string, title: string): Promise<void> {
+  const t = (title || '').trim()
+  if (!t) return
+  await api.patch(`/api/conversations/${id}`, { title: t })
+  const c = state.convs.find((x) => x.id === id)
+  if (c) c.title = t
+  if (state.current === id) state.convTitle = t
+}
+
 export async function sendText(text: string): Promise<void> {
   const t = (text || '').trim()
   if (!t) return

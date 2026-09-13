@@ -69,7 +69,7 @@ async def phone_checks(browser, fails: list[str]) -> None:
     await page.wait_for_selector(".sidebar", timeout=5000)
     await page.wait_for_timeout(300)
     # 面板浮层有意压在抽屉之上（只遮右侧），故指定抽屉内的会话项精确点击
-    first = page.locator(".sidebar .conv").first
+    first = page.locator(".sidebar .cs-item").first
     if await first.count():
         await first.dispatch_event("click")
         await page.wait_for_timeout(800)

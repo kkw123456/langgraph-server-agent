@@ -2,22 +2,24 @@
 // 主界面（对话）：会话列表 + 聊天区 + 右侧结果面板。
 // 仿 WorkBuddy：右侧面板支持 展开 / 仅图标 / 收起 三态，可拖拽调宽、可全屏。
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import {
   NButton, NRadioGroup, NRadioButton, NTabs, NTabPane, NScrollbar, NEmpty, useMessage, useDialog,
 } from 'naive-ui'
 import {
   MessageSquare, ChevronsRight, ChevronsLeft, PanelRightOpen,
   FileText, FolderClosed, GitCompare, Maximize2, Minimize2, Download, Sparkles,
-  PanelRight, X, Wand2, Plus, PanelLeft, List,
+  PanelRight, X, PanelLeft, List,
 } from 'lucide-vue-next'
 import {
-  state, loadConvs, loadSkills, selectConv, newChat, deleteConv,
+  state, loadConvs, loadSkills, selectConv, newChat, deleteConv, renameConv,
   sendText, createSkill, setMode, filteredConvs,
 } from '../store'
 import type { CreateSkillPayload } from '../types'
 import { toolLabel } from '../utils/toolLabels'
 import { useBreakpoint } from '../composables/useBreakpoint'
-import ConversationList from '../components/ConversationList.vue'
+import { logout as authLogout } from '../auth'
+import ConversationSidebar from '../components/ConversationSidebar.vue'
 import ChatWindow from '../components/ChatWindow.vue'
 import FilePanel from '../components/FilePanel.vue'
 import ToolConfirm from '../components/ToolConfirm.vue'
@@ -26,6 +28,8 @@ import { api } from '../api'
 
 const props = defineProps<{ showRight?: boolean }>()
 
+const router = useRouter()
+const route = useRoute()
 const message = useMessage()
 const dialog = useDialog()
 const bp = useBreakpoint()
@@ -41,6 +45,8 @@ const tab = ref<'artifacts' | 'files' | 'diff' | 'preview'>('files')
 
 // 会话栏在窄屏变为抽屉：默认关闭，由顶栏/气泡按钮唤出
 const sidebarOpen = ref(false)
+// 桌面端「收起侧边栏」状态：收起后不占网格列，由顶栏按钮展开
+const sidebarCollapsed = ref(false)
 
 // 会话栏宽度与右侧面板宽度的上下限：中屏时同步收窄，避免挤压对话区
 const sidebarWidth = computed(() => (bp.isLg ? 260 : bp.isMd ? 224 : 208))
@@ -75,12 +81,15 @@ watch(
 const gridTemplate = computed(() => {
   // 覆盖层模式：三列塌缩为单列，两侧以绝对定位浮在内容之上
   if (overlay.value) return 'minmax(0, 1fr)'
-  if (!props.showRight) return `${sidebarWidth.value}px minmax(0, 1fr) 0px`
-  return `${sidebarWidth.value}px minmax(0, 1fr) ${panelCol.value}px`
+  const sw = sidebarCollapsed.value ? 0 : sidebarWidth.value
+  if (!props.showRight) return `${sw}px minmax(0, 1fr) 0px`
+  return `${sw}px minmax(0, 1fr) ${panelCol.value}px`
 })
 
-// 会话栏在桌面端常驻；窄屏仅在抽屉打开时渲染
-const sidebarVisible = computed(() => (overlay.value ? sidebarOpen.value : true))
+// 会话栏在桌面端常驻（除非被收起）；窄屏仅在抽屉打开时渲染
+const sidebarVisible = computed(() =>
+  overlay.value ? sidebarOpen.value : !sidebarCollapsed.value,
+)
 // 右侧面板在窄屏仅在「展开」态渲染，收起时不占位
 const panelVisible = computed(() =>
   overlay.value ? props.showRight && panelState.value === 'full' : !!props.showRight,
@@ -138,6 +147,55 @@ async function onSelectConv(id: string): Promise<void> {
 async function onCreate(): Promise<void> {
   sidebarOpen.value = false
   await newChat()
+}
+
+// 侧栏顶栏的「收起侧边栏」：窄屏是关抽屉，桌面是收起整列
+function onSidebarCollapse(): void {
+  if (overlay.value) sidebarOpen.value = false
+  else sidebarCollapsed.value = true
+}
+
+async function onRenameConv(id: string, title: string): Promise<void> {
+  await renameConv(id, title)
+  message.success('已重命名')
+}
+
+// 侧栏导航 tabs / 更多菜单 / 用户菜单的统一入口
+function onNav(key: string): void {
+  if (key === 'skill-new') {
+    sidebarOpen.value = false
+    showModal.value = true
+    return
+  }
+  if (key === 'bell') {
+    message.info('暂无新消息')
+    return
+  }
+  if (key === 'logout') {
+    dialog.warning({
+      title: '退出登录',
+      content: '确定要退出当前账号吗？',
+      positiveText: '退出',
+      negativeText: '取消',
+      onPositiveClick: async () => {
+        await authLogout()
+        router.replace('/login')
+      },
+    })
+    return
+  }
+  const routes: Record<string, string> = {
+    projects: '/projects',
+    experts: '/experts',
+    automation: '/automation',
+    library: '/library',
+    inspiration: '/inspiration',
+    settings: '/settings',
+  }
+  const path = routes[key]
+  if (!path) return
+  sidebarOpen.value = false
+  if (route.path !== path) router.push(path)
 }
 
 async function onSubmit(payload: CreateSkillPayload): Promise<void> {
@@ -214,39 +272,18 @@ onBeforeUnmount(() => {
     <!-- 窄屏抽屉遮罩：点击或按 Esc 关闭 -->
     <div v-if="overlay && sidebarOpen" class="shell-mask" @click="sidebarOpen = false"></div>
 
-    <!-- 列 1：会话列表（窄屏为抽屉） -->
+    <!-- 列 1：会话侧栏（WorkBuddy 风格；窄屏为抽屉） -->
     <aside v-if="sidebarVisible" class="sidebar">
-      <div class="sidebar-head">
-        <div class="sidebar-head-row">
-          <NButton type="primary" block @click="onCreate">
-            <template #icon><Plus :size="16" /></template>
-            新建对话
-          </NButton>
-          <NButton
-            v-if="overlay"
-            quaternary
-            circle
-            size="small"
-            class="sidebar-close"
-            title="收起会话列表"
-            @click="sidebarOpen = false"
-          >
-            <template #icon><X :size="16" /></template>
-          </NButton>
-        </div>
-      </div>
-      <ConversationList
+      <ConversationSidebar
         :convs="convsFiltered"
         :current="state.current"
         @select="onSelectConv"
         @delete="onDeleteConv"
+        @rename="onRenameConv"
+        @collapse="onSidebarCollapse"
+        @new-chat="onCreate"
+        @nav="onNav"
       />
-      <div class="sidebar-foot">
-        <NButton quaternary block @click="showModal = true">
-          <template #icon><Wand2 :size="16" /></template>
-          新建技能
-        </NButton>
-      </div>
     </aside>
 
     <!-- 列 2：对话区 -->
@@ -264,6 +301,18 @@ onBeforeUnmount(() => {
             @click="sidebarOpen = true"
           >
             <template #icon><List :size="16" /></template>
+          </NButton>
+          <!-- 桌面：侧栏被收起时提供展开入口 -->
+          <NButton
+            v-else-if="sidebarCollapsed"
+            quaternary
+            circle
+            size="small"
+            class="topic-btn"
+            title="展开侧边栏"
+            @click="sidebarCollapsed = false"
+          >
+            <template #icon><PanelLeft :size="16" /></template>
           </NButton>
           <MessageSquare v-else :size="15" class="topic-ico" />
           <h1>{{ state.convTitle }}</h1>

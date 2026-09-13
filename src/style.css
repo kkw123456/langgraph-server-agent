@@ -172,28 +172,64 @@ body {
 }
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 
-/* ============ 左侧会话栏 ============ */
+/* ============ 左侧会话栏（WorkBuddy 风格：ConversationSidebar.vue） ============ */
 .sidebar {
   background: var(--panel); border-right: 1px solid var(--border);
   display: flex; flex-direction: column; min-height: 0; min-width: 0;
 }
-.sidebar-head { padding: 10px; border-bottom: 1px solid var(--border); flex: 0 0 auto; }
-/* 窄屏抽屉里「新建对话」右侧需要关闭按钮，用一行 flex 承载 */
-.sidebar-head-row { display: flex; align-items: center; gap: 6px; }
-.sidebar-close { flex: 0 0 auto; }
-.sidebar-foot { padding: 8px; border-top: 1px solid var(--border); }
-.conv-list { flex: 1; overflow-y: auto; padding: 8px; min-height: 0; }
-.conv {
-  display: flex; align-items: center; gap: 8px;
-  padding: 6px 8px 6px 10px; border-radius: 9px; cursor: pointer; margin-bottom: 2px; color: var(--text);
+.cs-root { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+/* 顶栏：收起 / 搜索 两个图标按钮 */
+.cs-topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 10px 2px; flex: 0 0 auto;
 }
-.conv:hover { background: var(--hover); }
-.conv.active { background: var(--accent-weak); }
-.conv.active .conv-ico { color: var(--accent); }
-.conv-ico { color: var(--muted); flex: 0 0 auto; }
-.conv-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+/* 搜索框（点搜索按钮展开） */
+.cs-search { padding: 6px 10px 2px; flex: 0 0 auto; }
+/* 导航 tabs：新建任务 / 项目 / 专家·技能·连接器 / 更多，放不下自动换行 */
+.cs-tabs {
+  display: flex; flex-wrap: wrap; gap: 2px; padding: 6px 8px 8px;
+  border-bottom: 1px solid var(--border); flex: 0 0 auto;
+}
+.cs-tab {
+  display: inline-flex; align-items: center; gap: 5px; padding: 5px 9px;
+  border-radius: 8px; font-size: 12.5px; color: var(--muted); cursor: pointer;
+  white-space: nowrap; user-select: none; transition: background .15s, color .15s;
+}
+.cs-tab:hover { background: var(--hover); color: var(--text); }
+.cs-tab-primary { color: var(--accent); }
+.cs-tab-primary:hover { color: var(--accent); }
+/* 分组列表：组头吸顶，卡片两行（标题 + 相对时间） */
+.cs-groups {
+  flex: 1; overflow-y: auto; padding: 2px 8px 12px; min-height: 0;
+  overscroll-behavior: contain;
+}
+.cs-group-title {
+  position: sticky; top: 0; z-index: 2; background: var(--panel);
+  font-size: 11.5px; font-weight: 600; color: var(--muted); padding: 10px 4px 6px;
+}
+.cs-item {
+  display: flex; align-items: center; gap: 8px; padding: 7px 8px;
+  border-radius: 9px; cursor: pointer; margin-bottom: 2px;
+}
+.cs-item:hover { background: var(--hover); }
+.cs-item.active { background: var(--accent-weak); }
+.cs-item-ico { color: var(--muted); flex: 0 0 auto; }
+.cs-item.active .cs-item-ico { color: var(--accent); }
+.cs-item-main { flex: 1; min-width: 0; }
+.cs-item-title { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cs-item-time { font-size: 11px; color: var(--muted); margin-top: 1px; }
+.cs-rename-input { margin: 1px 0; }
+/* 悬浮操作（更多菜单）：桌面 hover 显示，触屏常显 */
+.cs-item-actions {
+  display: flex; align-items: center; gap: 2px; flex: 0 0 auto;
+  opacity: 0; transition: opacity .12s;
+}
+.cs-item:hover .cs-item-actions, .cs-item.active .cs-item-actions { opacity: 1; }
+@media (hover: none) {
+  .cs-item-actions { opacity: 1; }
+}
 /* 「运行中」徽标：该会话后台仍有对话轮次在执行 */
-.conv-running {
+.cs-run {
   display: inline-flex; align-items: center; gap: 4px; flex: 0 0 auto;
   font-size: 11px; color: #18a058; background: rgba(24, 160, 88, .12);
   padding: 1px 7px; border-radius: 999px; line-height: 1.6;
@@ -203,9 +239,23 @@ body {
   animation: run-pulse 1.2s ease-in-out infinite;
 }
 @keyframes run-pulse { 50% { opacity: .25; transform: scale(.8); } }
-.conv-del { opacity: 0; flex: 0 0 auto; }
-.conv:hover .conv-del { opacity: 1; }
-.conv-empty { padding: 20px 8px; }
+.cs-empty { padding: 24px 8px; }
+/* 底部用户菜单：头像 + 用户名 + 消息中心 */
+.cs-footer {
+  border-top: 1px solid var(--border); padding: 8px 10px; flex: 0 0 auto;
+  display: flex; align-items: center; justify-content: space-between; gap: 6px;
+}
+.cs-user {
+  display: flex; align-items: center; gap: 8px; padding: 4px 6px;
+  border-radius: 9px; cursor: pointer; min-width: 0;
+}
+.cs-user:hover { background: var(--hover); }
+.cs-avatar {
+  background: linear-gradient(135deg, var(--accent), #5b8def); color: #fff;
+  font-size: 13px; flex: 0 0 auto;
+}
+.cs-user-name { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cs-bell { flex: 0 0 auto; }
 
 /* ============ 中间主区（对话） ============ */
 .main { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg); }
@@ -701,7 +751,7 @@ body {
 @media (max-width: 480px) {
   .tab-label .tab-text { display: none; }
   .tab-label { gap: 0; }
-  .conv-running { display: none; } /* 会话行宽度有限，运行态让位于标题 */
+  .cs-run { display: none; } /* 会话行宽度有限，运行态让位于标题 */
 }
 
 /* 横屏矮视口（如手机横屏）：压缩纵向留白，保证对话区可用高度 */
