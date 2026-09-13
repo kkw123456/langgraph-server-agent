@@ -183,6 +183,9 @@ const panelMax = computed(() => (bp.isLg ? 820 : bp.isMd ? 620 : 480))
 
 // 窄屏（<1024）下右面板改为覆盖层
 const overlay = computed(() => bp.overlayPanel)
+// 移动端头部仅在手机宽度（<768）出现，与 Shell 抽屉断点对齐；
+// 768-1024 的 PC 窄窗口仍显示桌面消息头部 .c-head（此前误用 overlay 导致窄窗口无头部）
+const isXs = computed(() => bp.isXs)
 
 // 面板实际占据的宽度：收起为 0
 const panelCol = computed(() => {
@@ -338,7 +341,7 @@ onBeforeUnmount(() => {
   >
     <!-- 列 1：对话区（移动端顶部 header：会话列表 / 标题 / 新建 / 项目；右面板开关联动） -->
     <section class="main">
-      <header v-if="overlay" class="m-header">
+      <header v-if="isXs" class="m-header">
         <NButton quaternary circle size="small" title="会话列表" @click="state.sidebarOpen = true">
           <template #icon><List :size="18" /></template>
         </NButton>

@@ -107,7 +107,7 @@ body {
 /* 窄屏覆盖层模式：两列塌缩成单列，右面板变为抽屉/浮层 */
 .app-shell.as-overlay { grid-template-columns: minmax(0, 1fr); }
 .app-shell.as-overlay .right {
-  position: absolute; top: 0; bottom: 0; right: 0; width: min(92vw, 420px); z-index: 35;
+  position: absolute; top: 46px; bottom: 0; right: 0; width: min(92vw, 420px); z-index: 35;
   border-left: 1px solid var(--border); box-shadow: 0 -10px 30px rgba(0,0,0,.14);
 }
 
