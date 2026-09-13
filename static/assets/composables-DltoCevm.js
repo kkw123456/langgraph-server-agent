@@ -1,1 +1,0 @@
-import{Qn as e,Yt as t,h as n}from"./index-B-84Kufr.js";function r(){let r=e(n,null);return r===null&&t(`use-dialog`,`No outer <n-dialog-provider /> founded.`),r}export{r as t};

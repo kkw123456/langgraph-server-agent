@@ -18,6 +18,7 @@ interface AppState {
   running: boolean          // 当前会话是否有正在进行的对话轮次
   filesTick: number         // 会话工作目录变化信号：创建文件类工具结束 / 会话完成时 +1，文件面板据此刷新
   sidebarOpen: boolean      // 移动端会话栏抽屉开关（由 Shell 渲染，聊天区按钮触发）
+  rightOpen: boolean        // 右侧结果面板显隐（PC 消息头部 / 移动端 header 的面板开关）
 }
 
 // 轻量级全局 store：单一响应式 state + 动作函数。
@@ -37,6 +38,7 @@ export const state = reactive<AppState>({
   running: false,
   filesTick: 0,
   sidebarOpen: false,
+  rightOpen: true,
 })
 
 let ws: WebSocket | null = null

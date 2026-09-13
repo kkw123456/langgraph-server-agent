@@ -15,27 +15,33 @@ class AgentManager:
         self.registry = registry
         self._cache: dict = {}
         self._cache_key = None
-        # 当前模型（可在运行时切换，初值取 .env 的 MODEL）
+        # 当前模型与对应的 OpenAI 兼容接口（可在运行时切换，初值取 .env 的默认提供商）
         self.model_name = MODEL
+        self.base_url = OPENAI_BASE_URL
+        self.api_key = OPENAI_API_KEY
         self.temperature = TEMPERATURE
 
     def _model(self) -> ChatOpenAI:
-        if not OPENAI_API_KEY:
+        if not self.api_key:
             raise RuntimeError(
-                "未配置 OPENAI_API_KEY，请在 .env 中设置（支持任意 OpenAI 兼容接口，"
-                "可通过 OPENAI_BASE_URL 指向 DeepSeek / 本地 Ollama 等）。"
+                "未配置 api_key：请在 .env 中设置 OPENAI_API_KEY，或在「设置 → 模型管理」"
+                "为所选提供商填写密钥（支持任意 OpenAI 兼容接口）。"
             )
         return ChatOpenAI(
             model=self.model_name,
-            api_key=OPENAI_API_KEY,
-            base_url=OPENAI_BASE_URL,
+            api_key=self.api_key,
+            base_url=self.base_url,
             temperature=self.temperature,
             streaming=True,
         )
 
-    def set_model(self, name: str) -> None:
-        """切换模型并让已编译的图失效（下次 get_agent 时重建）。"""
+    def set_model(self, name: str, base_url: str | None = None, api_key: str | None = None) -> None:
+        """切换模型（可携带该模型所属提供商的接口地址与密钥），并让已编译的图失效。"""
         self.model_name = name
+        if base_url is not None:
+            self.base_url = base_url
+        if api_key is not None:
+            self.api_key = api_key
         self._cache.clear()
         self._cache_key = None
 
@@ -61,8 +67,8 @@ class AgentManager:
         return "\n".join(lines)
 
     def get_agent(self):
-        """按「启用技能集合 + 当前模型」缓存编译好的图，任一变动即重建。"""
-        key = (frozenset(self.registry.enabled_ids()), self.model_name)
+        """按「启用技能集合 + 当前模型 + 接口地址」缓存编译好的图，任一变动即重建。"""
+        key = (frozenset(self.registry.enabled_ids()), self.model_name, self.base_url)
         if self._cache_key != key:
             tools = self.registry.enabled_tools()
             agent = create_react_agent(

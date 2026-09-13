@@ -22,7 +22,7 @@ function ensureFileViewer(): Promise<void> {
   }
   return fvReady
 }
-import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   NButton, NScrollbar, NEmpty, useMessage,
@@ -33,7 +33,7 @@ import {
   X, List,
 } from 'lucide-vue-next'
 import {
-  state, loadConvs, loadSkills, selectConv, newChat,
+  state, loadConvs, loadSkills, selectConv, newChat, renameConv,
   sendText,
 } from '../store'
 import { toolLabel } from '../utils/toolLabels'
@@ -236,6 +236,33 @@ async function onNewChat(): Promise<void> {
   if (route.path !== '/') router.push('/')
 }
 
+// ===================== PC 消息头部：会话标题就地编辑 =====================
+const editingTitle = ref(false)
+const titleDraft = ref('')
+const titleInput = ref<HTMLInputElement | null>(null)
+function startEditTitle(): void {
+  if (!state.current) return
+  titleDraft.value = state.convTitle
+  editingTitle.value = true
+  void nextTick(() => titleInput.value?.focus())
+}
+function cancelTitle(): void {
+  editingTitle.value = false
+}
+async function confirmTitle(): Promise<void> {
+  if (!editingTitle.value) return
+  editingTitle.value = false
+  const t = titleDraft.value.trim()
+  if (state.current && t && t !== state.convTitle) {
+    try {
+      await renameConv(state.current, t)
+      message.success('已重命名')
+    } catch {
+      message.error('重命名失败')
+    }
+  }
+}
+
 function startResize(e: MouseEvent): void {
   if (panelState.value !== 'full' || !props.showRight) return
   resizing.value = true
@@ -319,21 +346,60 @@ onBeforeUnmount(() => {
         <NButton quaternary circle size="small" title="新建会话" @click="onNewChat">
           <template #icon><Plus :size="18" /></template>
         </NButton>
-        <NButton quaternary circle size="small" title="项目" @click="router.push('/projects')">
-          <template #icon><FolderClosed :size="17" /></template>
+        <NButton
+          quaternary
+          circle
+          size="small"
+          :title="state.rightOpen ? '收起面板' : '打开面板'"
+          @click="state.rightOpen = !state.rightOpen"
+        >
+          <template #icon>
+            <PanelRightClose v-if="state.rightOpen" :size="18" />
+            <PanelRightOpen v-else :size="18" />
+          </template>
         </NButton>
       </header>
+      <!-- PC 消息列表头部：可编辑会话标题 + 右面板开关 -->
+      <header v-else class="c-head">
+        <template v-if="state.current">
+          <input
+            v-if="editingTitle"
+            ref="titleInput"
+            v-model="titleDraft"
+            class="c-title-input"
+            @keyup.enter="confirmTitle"
+            @keyup.esc="cancelTitle"
+            @blur="confirmTitle"
+          />
+          <b v-else class="c-title" title="点击修改会话标题" @click="startEditTitle">{{ state.convTitle }}</b>
+        </template>
+        <b v-else class="c-title muted">新对话</b>
+        <span class="c-head-grow"></span>
+        <NButton
+          quaternary
+          circle
+          size="small"
+          :title="state.rightOpen ? '收起右侧面板' : '打开右侧面板'"
+          @click="state.rightOpen = !state.rightOpen"
+        >
+          <template #icon>
+            <PanelRightClose v-if="state.rightOpen" :size="16" />
+            <PanelRightOpen v-else :size="16" />
+          </template>
+        </NButton>
+      </header>
+      <!-- 折叠态浮动把手：仅在面板被折叠后显示，用于恢复宽态（避免与头部开关重叠） -->
       <NButton
-        v-if="showRight && !overlay"
+        v-if="showRight && !overlay && panelState === 'collapsed'"
         quaternary
         circle
         size="small"
         class="float-btn panel-handle"
-        :title="panelState === 'collapsed' ? '展开右侧面板' : '收起右侧面板'"
+        title="展开右侧面板"
         @click="togglePanel"
       >
         <template #icon>
-          <component :is="panelState === 'collapsed' ? PanelRightOpen : PanelRightClose" :size="16" />
+          <PanelRightOpen :size="16" />
         </template>
       </NButton>
 

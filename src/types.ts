@@ -139,10 +139,20 @@ export interface LibraryItem {
 }
 
 // 运行时信息：可选模型与当前模型，以及各域统计（用于设置页展示）
+/** 模型提供商（OpenAI 兼容），api_key 服务端只回传脱敏提示 */
+export interface RuntimeProvider {
+  name: string
+  base_url: string
+  has_key?: boolean
+  key_hint?: string
+  models: string[]
+}
+
 export interface RuntimeInfo {
   model: string
   base_url?: string
   models: string[]
+  providers?: RuntimeProvider[]
   temperature?: number
   skills_enabled: number
   skills_total: number

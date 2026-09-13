@@ -1,57 +1,101 @@
 <script setup lang="ts">
 // 设置页：展示运行时信息（模型、推理服务地址、技能与会话统计），
 // 提供模型切换、工具权限模式切换、退出登录。
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, computed, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   NCard, NRadioGroup, NRadioButton, NSelect, NButton, NTag, NInput, useMessage, useDialog,
 } from 'naive-ui'
-import { Settings, LogOut, RefreshCw, Cpu, ShieldCheck, Database, Check, X } from 'lucide-vue-next'
+import { Settings, LogOut, RefreshCw, Cpu, ShieldCheck, Database, Check, X, Plus, Server } from 'lucide-vue-next'
 import { state, setMode } from '../store'
-import { wb, loadRuntime, setModel, addModel, removeModel } from '../workbench'
+import { wb, loadRuntime, setModel, addModel, removeModel, addProvider, removeProvider } from '../workbench'
 import { authState, logout as doLogout } from '../auth'
 import { api } from '../api'
-import { computed } from 'vue'
 
 const message = useMessage()
 const dialog = useDialog()
 const router = useRouter()
 
-const modelOptions = computed(() =>
-  wb.runtime.models.map((m) => ({ label: m, value: m })),
-)
+const modelOptions = computed(() => {
+  const all = new Set<string>(wb.runtime.models)
+  for (const p of wb.runtime.providers || []) for (const m of p.models || []) all.add(m)
+  return [...all].filter(Boolean).map((m) => ({ label: m, value: m }))
+})
 
-async function onModel(v: string): Promise<void> {
-  if (v && v !== wb.runtime.model) await setModel(v)
-}
+// ===================== 模型管理：提供商分组 / 添加 / 设为当前 / 删除 =====================
+interface ProviderGroup { name: string; label: string; sub: string; models: string[]; builtin: boolean }
+const providerGroups = computed<ProviderGroup[]>(() => [
+  {
+    name: '', label: '默认提供商',
+    sub: wb.runtime.base_url || '（使用 .env 配置的接口地址）',
+    models: wb.runtime.models, builtin: true,
+  },
+  ...(wb.runtime.providers || []).map((p) => ({
+    name: p.name,
+    label: p.name,
+    sub: `${p.base_url}${p.has_key ? ` · 密钥 ${p.key_hint || '已设置'}` : ' · 未设密钥'}`,
+    models: p.models || [],
+    builtin: false,
+  })),
+])
 
-// ===================== 模型管理：添加 / 设为当前 / 删除 =====================
-const newModel = ref('')
-const adding = ref(false)
-async function onAddModel(): Promise<void> {
-  const name = newModel.value.trim()
+// 每个分组的「添加模型」输入框内容
+const groupInputs = reactive<Record<string, string>>({})
+async function onAddModelTo(group: ProviderGroup): Promise<void> {
+  const name = (groupInputs[group.name] || '').trim()
   if (!name) {
     message.warning('请输入模型名称')
     return
   }
-  adding.value = true
-  try {
-    const ok = await addModel(name)
-    if (ok) newModel.value = ''
-  } finally {
-    adding.value = false
-  }
+  if (await addModel(name, group.name)) groupInputs[group.name] = ''
 }
-function onRemoveModel(m: string): void {
+function onRemoveModel(m: string, group: ProviderGroup): void {
   dialog.warning({
     title: '删除模型',
-    content: `确定从模型列表删除 ${m} 吗？`,
+    content: `确定从 ${group.label} 删除 ${m} 吗？`,
     positiveText: '删除',
     negativeText: '取消',
-    onPositiveClick: async () => {
-      await removeModel(m)
-    },
+    onPositiveClick: () => removeModel(m, group.name),
   })
+}
+function onRemoveProvider(group: ProviderGroup): void {
+  dialog.warning({
+    title: '删除提供商',
+    content: `删除 ${group.label} 将同时移除其下 ${group.models.length} 个模型，确定吗？`,
+    positiveText: '删除',
+    negativeText: '取消',
+    onPositiveClick: () => removeProvider(group.name),
+  })
+}
+
+// 「添加提供商」表单
+const showProviderForm = ref(false)
+const pName = ref('')
+const pUrl = ref('')
+const pKey = ref('')
+const addingProvider = ref(false)
+async function submitProvider(): Promise<void> {
+  const name = pName.value.trim()
+  const url = pUrl.value.trim()
+  if (!name || !url) {
+    message.warning('提供商名称与接口地址不能为空')
+    return
+  }
+  addingProvider.value = true
+  try {
+    if (await addProvider(name, url, pKey.value)) {
+      pName.value = ''
+      pUrl.value = ''
+      pKey.value = ''
+      showProviderForm.value = false
+    }
+  } finally {
+    addingProvider.value = false
+  }
+}
+
+async function onModel(v: string): Promise<void> {
+  if (v && v !== wb.runtime.model) await setModel(v)
 }
 
 async function refresh(): Promise<void> {
@@ -92,7 +136,7 @@ onMounted(loadRuntime)
 
     <div class="page-body">
       <div class="set-body">
-        <NCard size="small" title="模型">
+        <NCard size="small" title="模型管理">
           <div class="set-body set-body-flat">
             <div class="set-row">
               <span class="set-label">当前模型</span>
@@ -107,60 +151,72 @@ onMounted(loadRuntime)
                 />
               </span>
             </div>
+
+            <!-- 添加提供商（折叠表单） -->
             <div class="set-row set-row-top">
-              <span class="set-label">添加模型</span>
+              <span class="set-label">模型提供商</span>
               <span class="set-val set-val-inline">
-                <NInput
-                  v-model:value="newModel"
-                  class="set-model-input"
-                  size="small"
-                  placeholder="输入模型名称，如 gpt-4o-mini"
-                  :disabled="adding"
-                  clearable
-                  @keyup.enter="onAddModel"
-                />
-                <NButton size="small" type="primary" secondary :loading="adding" @click="onAddModel">
-                  添加
+                <NButton v-if="!showProviderForm" size="small" secondary @click="showProviderForm = true">
+                  <template #icon><Plus :size="14" /></template>
+                  添加提供商
                 </NButton>
+                <template v-else>
+                  <NInput v-model:value="pName" class="set-prov-input" size="small" placeholder="名称，如 DeepSeek" :disabled="addingProvider" />
+                  <NInput v-model:value="pUrl" class="set-prov-input set-prov-url" size="small" placeholder="接口地址 https://…" :disabled="addingProvider" />
+                  <NInput v-model:value="pKey" class="set-prov-input" size="small" type="password" show-password-on="click" placeholder="API Key（可选）" :disabled="addingProvider" @keyup.enter="submitProvider" />
+                  <NButton size="small" type="primary" secondary :loading="addingProvider" @click="submitProvider">保存</NButton>
+                  <NButton size="small" quaternary @click="showProviderForm = false">取消</NButton>
+                </template>
               </span>
             </div>
-            <div class="set-row set-row-top">
-              <span class="set-label">模型列表（{{ wb.runtime.models.length }}）</span>
+
+            <!-- 各提供商分组：模型 chips + 组内添加/删除 -->
+            <div v-for="g in providerGroups" :key="g.name || '__default__'" class="set-row set-row-top set-prov-group">
+              <span class="set-label set-prov-label">
+                <Server :size="13" />
+                <span class="set-prov-name">{{ g.label }}</span>
+                <span class="set-prov-sub muted">{{ g.sub }}</span>
+                <NButton
+                  v-if="!g.builtin"
+                  quaternary
+                  circle
+                  size="tiny"
+                  type="error"
+                  title="删除提供商"
+                  @click="onRemoveProvider(g)"
+                >
+                  <template #icon><X :size="12" /></template>
+                </NButton>
+              </span>
               <span class="set-val set-model-list">
                 <span
-                  v-for="m in wb.runtime.models"
-                  :key="m"
+                  v-for="m in g.models"
+                  :key="g.name + m"
                   class="set-model-chip"
                   :class="{ current: m === wb.runtime.model }"
                 >
                   <span class="set-model-name">{{ m }}</span>
                   <NTag v-if="m === wb.runtime.model" size="tiny" type="success" :bordered="false">当前</NTag>
-                  <NButton
-                    quaternary
-                    circle
-                    size="tiny"
-                    class="set-model-btn"
-                    title="设为当前"
-                    @click="onModel(m)"
-                  >
+                  <NButton quaternary circle size="tiny" class="set-model-btn" title="设为当前" @click="onModel(m)">
                     <template #icon><Check :size="13" /></template>
                   </NButton>
-                  <NButton
-                    quaternary
-                    circle
-                    size="tiny"
-                    class="set-model-btn"
-                    title="删除"
-                    @click="onRemoveModel(m)"
-                  >
+                  <NButton quaternary circle size="tiny" class="set-model-btn" title="删除" @click="onRemoveModel(m, g)">
                     <template #icon><X :size="13" /></template>
                   </NButton>
                 </span>
+                <span v-if="!g.models.length" class="muted tiny">暂无模型</span>
+                <span class="set-val-inline set-prov-add">
+                  <NInput
+                    v-model:value="groupInputs[g.name]"
+                    class="set-model-input"
+                    size="tiny"
+                    placeholder="添加模型名"
+                    clearable
+                    @keyup.enter="onAddModelTo(g)"
+                  />
+                  <NButton size="tiny" secondary @click="onAddModelTo(g)">添加</NButton>
+                </span>
               </span>
-            </div>
-            <div class="set-row">
-              <span class="set-label">推理服务地址</span>
-              <span class="set-val set-mono muted">{{ wb.runtime.base_url || '—' }}</span>
             </div>
           </div>
         </NCard>

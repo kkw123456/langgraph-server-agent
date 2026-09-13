@@ -96,7 +96,6 @@ const navItems: NavItem[] = [
 // 当前路由对应的高亮项（与 Shell 的 activeKey 规则一致）
 const activeNav = computed(() => {
   const p = route.path
-  if (p.startsWith('/projects')) return 'projects'
   if (p.startsWith('/experts')) return 'experts'
   if (p.startsWith('/automation')) return 'automation'
   if (p.startsWith('/library')) return 'library'

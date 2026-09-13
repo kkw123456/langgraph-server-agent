@@ -11,8 +11,8 @@ import { computed, onMounted, onBeforeUnmount, watch, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useMessage, useDialog } from 'naive-ui'
 import {
-  BookMarked, Clock, Lightbulb,
-  MessageSquare, Puzzle,
+  BookMarked, Clock, Lightbulb, ListChecks,
+  Puzzle,
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
 import { state, newChat, selectConv, deleteConv, renameConv, filteredConvs, closeWs } from '../store'
@@ -31,8 +31,8 @@ const bp = useBreakpoint()
 const sidebarCollapsed = ref(false)
 // 移动端抽屉由全局 store 驱动（聊天区顶栏的列表按钮触发）
 const overlay = computed(() => bp.isXs)
-// 右侧结果面板仅在对话页出现（Home 接收 show-right 决定是否渲染）
-const showRight = computed(() => route.path === '/')
+// 右侧结果面板仅在对话页出现，且可由消息头部 / 移动端 header 的面板开关控制
+const showRight = computed(() => route.path === '/' && state.rightOpen)
 // 是否渲染侧栏：桌面常驻；移动端仅在抽屉打开时渲染
 const sidebarVisible = computed(() => (overlay.value ? state.sidebarOpen : true))
 // 桌面收起宽度与展开宽度一致沿用 --sidebar-w / 56px rail
@@ -93,7 +93,6 @@ function onNav(key: string): void {
     return
   }
   const routes: Record<string, string> = {
-    projects: '/projects',
     experts: '/experts',
     automation: '/automation',
     library: '/library',
@@ -107,9 +106,9 @@ function onNav(key: string): void {
   if (route.fullPath !== path) router.push(path)
 }
 
-// ===================== 移动端底部菜单 =====================
+// ===================== 移动端底部菜单（任务 / 专家 / 自动化 / 资料库 / 灵感） =====================
 const tabItems: { key: string; label: string; icon: Component; path: string }[] = [
-  { key: 'home', label: '项目', icon: MessageSquare, path: '/' },
+  { key: 'home', label: '任务', icon: ListChecks, path: '/' },
   { key: 'experts', label: '专家·技能·连接器', icon: Puzzle, path: '/experts' },
   { key: 'automation', label: '自动化', icon: Clock, path: '/automation' },
   { key: 'library', label: '资料库', icon: BookMarked, path: '/library' },
@@ -170,12 +169,14 @@ onBeforeUnmount(() => {
       <!-- 列 2：内容区（首页聊天 / 各功能页） -->
       <main class="content">
         <RouterView v-slot="{ Component }">
-          <component :is="Component" :show-right="showRight" />
+          <Transition name="page" mode="out-in">
+            <component :is="Component" :show-right="showRight" />
+          </Transition>
         </RouterView>
       </main>
     </div>
 
-    <!-- 移动端底部菜单：项目（当前会话）/ 专家·技能·连接器 / 自动化 / 资料库 / 灵感（用户入口在抽屉底部） -->
+    <!-- 移动端底部菜单：任务（当前会话）/ 专家·技能·连接器 / 自动化 / 资料库 / 灵感（用户入口在抽屉底部） -->
     <nav class="tabbar">
       <span
         v-for="t in tabItems"

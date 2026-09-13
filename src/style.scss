@@ -287,7 +287,8 @@ body {
 }
 /* 气泡列与输入框同宽（--chat-w），左右边缘对齐 */
 .msg { display: flex; gap: 10px; padding: 8px 0; max-width: var(--chat-w); width: 100%; margin: 0 auto; }
-.msg.user { justify-content: flex-end; }
+/* 用户消息镜像排布：头像在最右，气泡在头像左侧 */
+.msg.user { flex-direction: row-reverse; }
 .avatar { flex: 0 0 auto; margin-top: 2px; color: #fff !important; }
 .avatar.user { background: var(--accent); box-shadow: 0 1px 3px rgba(24, 160, 88, .25); }
 .avatar.assistant { background: var(--accent-grad); box-shadow: 0 1px 4px rgba(24, 160, 88, .22); }
@@ -303,7 +304,7 @@ body {
 }
 .msg.user .bubble {
   background: var(--accent-grad); color: #fff;
-  border-bottom-right-radius: 5px; order: 1; box-shadow: 0 2px 10px rgba(24, 160, 88, .26);
+  border-bottom-right-radius: 5px; box-shadow: 0 2px 10px rgba(24, 160, 88, .26);
 }
 .msg.assistant .bubble {
   background: var(--panel); border: 1px solid transparent; border-bottom-left-radius: 5px;
@@ -387,19 +388,8 @@ body {
 }
 .tool-node.running .tn-ico { background: rgba(24, 160, 88, .16); }
 .tn-name { font-size: 12.5px; font-weight: 600; flex: 0 0 auto; }
-.tn-arg {
-  font-size: 11.5px; flex: 1; min-width: 0;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-family: "SF Mono", Consolas, Menlo, monospace;
-}
 .tn-state { flex: 0 0 auto; color: var(--accent); }
 .tn-done { color: var(--ok); }
-.tn-body {
-  margin: 0; padding: 8px 10px; border-top: 1px solid var(--border);
-  font-size: 12px; line-height: 1.6; background: var(--panel); color: var(--text);
-  overflow-x: auto; font-family: "SF Mono", Consolas, Menlo, monospace;
-  white-space: pre-wrap; word-break: break-word; max-height: 280px; overflow-y: auto;
-}
 
 /* ---- 等待模型回复的 shimmer 占位 ---- */
 .waiting-bubble { display: inline-flex; align-items: center; gap: 10px; }
@@ -829,9 +819,6 @@ body {
   .page-title .count { display: none; }
 }
 
-@media (max-width: 480px) {
-  .tn-arg { display: none; } /* 会话行宽度有限，参数摘要让位于名称 */
-}
 
 /* 横屏矮视口 */
 @media (max-height: 560px) and (min-width: 768px) {
@@ -949,3 +936,142 @@ body {
 /* ---- 骨架屏辅助间距 ---- */
 .sk-title { margin-bottom: 10px; }
 .sk-line { margin-top: 8px; }
+
+/* ============================================================
+   v3 增补：消息头部 / 用户头像镜像 / 工具节点明细 / 提供商分组 / 动画
+   ============================================================ */
+
+/* ---- PC 消息列表头部：会话标题（点击编辑）+ 右面板开关 ---- */
+.c-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+  height: 46px;
+  padding: 0 16px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+.c-title {
+  font-size: 14.5px;
+  font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: text;
+  border-radius: 6px;
+  padding: 2px 6px;
+  margin-left: -6px;
+  transition: background .15s ease;
+  &:hover { background: var(--accent-weak); }
+}
+.c-title-input {
+  flex: 0 1 420px;
+  min-width: 0;
+  font-size: 14.5px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border: 1.5px solid var(--accent);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  outline: none;
+}
+.c-head-grow { flex: 1; min-width: 0; }
+
+/* ---- 工具节点：语义标题 / 文件路径可点 / JSON 明细 ---- */
+.tn-name {
+  font-size: 12.5px;
+  font-weight: 550;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: "SF Mono", Consolas, Menlo, monospace;
+}
+.tn-path {
+  flex: 0 0 auto;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+  font-family: "SF Mono", Consolas, Menlo, monospace;
+  color: var(--accent);
+  cursor: pointer;
+  padding: 1px 6px;
+  border-radius: 6px;
+  &:hover { background: var(--accent-weak); text-decoration: underline; }
+}
+.tn-chev { color: var(--muted); transition: transform .18s ease; &.flip { transform: rotate(-180deg); } }
+.tn-body {
+  border-top: 1px solid var(--border);
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 300px;
+  overflow-y: auto;
+  animation: tn-slide .16s ease;
+}
+@keyframes tn-slide { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+.tn-sec-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  letter-spacing: .04em;
+  margin-bottom: 4px;
+}
+.tn-json {
+  margin: 0;
+  padding: 8px 10px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-family: "SF Mono", Consolas, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+/* ---- 设置页：提供商分组 ---- */
+.set-prov-group { padding: 10px 0; border-top: 1px dashed var(--border); &:first-of-type { border-top: 0; } }
+.set-prov-label { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.set-prov-name { font-weight: 600; flex: 0 0 auto; }
+.set-prov-sub {
+  font-size: 11px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.set-prov-add { margin-top: 6px; }
+.set-prov-input { width: 200px; max-width: 100%; }
+.set-prov-url { width: 260px; }
+
+/* ---- 技能页：两层滚动链（page-body 为 flex 容器，sm-body 内部滚动） ---- */
+.experts-body { display: flex; flex-direction: column; }
+
+/* ---- 页面切换过渡 ---- */
+.page-enter-active { animation: page-fade .18s ease; }
+.page-leave-active { animation: page-fade .12s ease reverse; }
+@keyframes page-fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+/* ---- 卡片与列表项的轻量交互动画 ---- */
+.grid-cards .n-card,
+.lib-card,
+.skill-card {
+  transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease;
+  &:hover { transform: translateY(-2px); box-shadow: 0 6px 18px rgba(31, 35, 40, .08); }
+}
+.cs-item,
+.fi-item,
+.qcard,
+.ma-card { transition: background .15s ease, border-color .15s ease, transform .15s ease; }
+.qcard:hover { transform: translateY(-1px); }

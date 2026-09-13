@@ -6,7 +6,7 @@ import { reactive } from 'vue'
 import { api } from './api'
 import { message as toast } from './main'
 import type {
-  Project, Automation, LibraryItem, RuntimeInfo, AutoSchedule,
+  Project, Automation, LibraryItem, RuntimeInfo, RuntimeProvider, AutoSchedule,
 } from './types'
 
 interface WorkbenchState {
@@ -204,30 +204,66 @@ export async function setModel(name: string): Promise<boolean> {
   return true
 }
 
-/** 添加模型到可用列表（持久化到服务端）。 */
-export async function addModel(name: string): Promise<boolean> {
+/** 添加模型到可用列表（持久化到服务端）；provider 非空时挂到该自定义提供商下。 */
+export async function addModel(name: string, provider = ''): Promise<boolean> {
   const n = (name || '').trim()
   if (!n) return false
-  const r = await api.post<{ ok: boolean; models?: string[]; error?: string }>('/api/runtime/models', { name: n })
+  const r = await api.post<{
+    ok: boolean; models?: string[]; providers?: RuntimeProvider[]; error?: string
+  }>('/api/runtime/models', { name: n, provider })
   if (!r.ok) {
     toast.error(r.error || '添加失败')
     return false
   }
-  wb.runtime.models = r.models || []
+  if (r.providers) wb.runtime.providers = r.providers
+  if (r.models) wb.runtime.models = r.models
   toast.success(`已添加模型 ${n}`)
   return true
 }
 
-/** 从可用列表移除模型。 */
-export async function removeModel(name: string): Promise<boolean> {
-  const r = await api.del<{ ok: boolean; models?: string[]; model?: string; error?: string }>(
-    `/api/runtime/models/${encodeURIComponent(name)}`,
-  )
+/** 从可用列表移除模型；provider 非空时从该自定义提供商下移除。 */
+export async function removeModel(name: string, provider = ''): Promise<boolean> {
+  const url = provider
+    ? `/api/runtime/providers/${encodeURIComponent(provider)}/models/${encodeURIComponent(name)}`
+    : `/api/runtime/models/${encodeURIComponent(name)}`
+  const r = await api.del<{
+    ok: boolean; models?: string[]; providers?: RuntimeProvider[]; model?: string; error?: string
+  }>(url)
   if (!r.ok) {
     toast.error(r.error || '删除失败')
     return false
   }
-  wb.runtime.models = r.models || []
+  if (r.providers) wb.runtime.providers = r.providers
+  if (r.models) wb.runtime.models = r.models
+  if (r.model) wb.runtime.model = r.model
+  return true
+}
+
+/** 添加模型提供商（OpenAI 兼容接口：名称 + 地址 + 密钥）。 */
+export async function addProvider(name: string, baseUrl: string, apiKey = ''): Promise<boolean> {
+  const r = await api.post<{ ok: boolean; providers?: RuntimeProvider[]; error?: string }>(
+    '/api/runtime/providers',
+    { name: (name || '').trim(), base_url: (baseUrl || '').trim(), api_key: (apiKey || '').trim() },
+  )
+  if (!r.ok) {
+    toast.error(r.error || '添加提供商失败')
+    return false
+  }
+  wb.runtime.providers = r.providers || []
+  toast.success(`已添加提供商 ${name}`)
+  return true
+}
+
+/** 删除模型提供商（其下模型一并移除；正用的模型会回退到默认表）。 */
+export async function removeProvider(name: string): Promise<boolean> {
+  const r = await api.del<{
+    ok: boolean; providers?: RuntimeProvider[]; model?: string; error?: string
+  }>(`/api/runtime/providers/${encodeURIComponent(name)}`)
+  if (!r.ok) {
+    toast.error(r.error || '删除失败')
+    return false
+  }
+  wb.runtime.providers = r.providers || []
   if (r.model) wb.runtime.model = r.model
   return true
 }

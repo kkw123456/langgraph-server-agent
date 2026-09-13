@@ -4,7 +4,7 @@ import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { NAvatar } from 'naive-ui'
 import {
-  Bot, BrainCircuit, Braces, Check, Code2, Eye, File as FileIco, FileOutput, FilePlus2, FileText, FolderClosed,
+  Bot, BrainCircuit, Braces, ChevronDown, Code2, Eye, File as FileIco, FileOutput, FilePlus2, FileText, FolderClosed,
   Globe, Loader2, Table2, Terminal, UserRound, Wrench,
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
@@ -72,6 +72,8 @@ const segments = computed<Seg[]>(() => {
   }
 
   // 按 at 切分：每个工具组的文本前置段 = content[上一组结束, 本组 at)
+  // 末组边界是最后一个工具自己的 at（其后文本留给 tail），否则工具后的
+  // 输出会被错误地搬到工具上面（先有文本再有工具的时间线就反了）
   const out: Seg[] = []
   let cursor = 0
   let group: ToolCall[] = []
@@ -88,7 +90,7 @@ const segments = computed<Seg[]>(() => {
     if (group.length && at !== (group[0].at ?? at)) flushGroup(at)
     group.push(tc)
   }
-  flushGroup(content.length)
+  flushGroup(group.length ? Number(group[0].at ?? content.length) : content.length)
   const tail = content.slice(cursor)
   if (tail.trim()) out.push({ kind: 'text', text: tail })
   for (const seg of out) {
@@ -125,6 +127,72 @@ const TOOL_ICONS: Record<string, Component> = {
 }
 function toolIcon(name: string): Component {
   return TOOL_ICONS[name] || Wrench
+}
+
+// ===================== 工具节点：语义化标题 + JSON 明细 =====================
+/** 把工具输入 JSON 解析出来（失败返回 null，按原文展示）。 */
+function parseInput(input: string): Record<string, unknown> | null {
+  try {
+    const obj = JSON.parse(input)
+    return obj && typeof obj === 'object' ? obj : null
+  } catch {
+    return null
+  }
+}
+function pick(obj: Record<string, unknown> | null, ...keys: string[]): string {
+  if (!obj) return ''
+  for (const k of keys) {
+    const v = obj[k]
+    if (typeof v === 'string' && v.trim()) return v
+  }
+  return ''
+}
+
+/** 语义化标题：修改 xxx / 删除 xxx / 执行脚本 xxx / 运行命令 xxx；附带可点击的文件路径。 */
+function toolSummary(tc: ToolCall): { title: string; path?: string } {
+  const obj = parseInput(tc.input)
+  const path = pick(obj, 'path', 'file', 'file_path', 'dir', 'directory')
+  switch (tc.name) {
+    case 'run_python':
+      return { title: `执行脚本 ${truncate(pick(obj, 'code') || tc.input, 66)}` }
+    case 'run_command':
+    case 'run_shell':
+    case 'bash':
+      return { title: `运行命令 ${truncate(pick(obj, 'command', 'cmd') || tc.input, 66)}` }
+    case 'write_file':
+      return { title: `添加 ${path || '文件'}`, path: path || undefined }
+    case 'edit_file':
+      return { title: `修改 ${path || '文件'}`, path: path || undefined }
+    case 'delete_file':
+      return { title: `删除 ${path || '文件'}`, path: path || undefined }
+    case 'make_dir':
+      return { title: `添加目录 ${path || ''}`, path: path || undefined }
+    case 'read_file':
+      return { title: `读取 ${path || '文件'}`, path: path || undefined }
+    case 'list_dir':
+      return { title: `浏览目录 ${path || '.'}`, path: path || undefined }
+    case 'search_files':
+      return { title: `搜索 ${truncate(pick(obj, 'pattern', 'query', 'keyword') || tc.input, 50)}` }
+    case 'web_search':
+      return { title: `联网搜索 ${truncate(pick(obj, 'query', 'keyword') || tc.input, 50)}` }
+    case 'web_fetch':
+    case 'fetch_url':
+      return { title: `抓取网页 ${truncate(pick(obj, 'url') || tc.input, 50)}` }
+    case 'calculator':
+      return { title: `计算 ${truncate(pick(obj, 'expression') || tc.input, 50)}` }
+    default:
+      return { title: `${toolLabel(tc.name)} ${truncate(tc.input, 50)}`, path: path || undefined }
+  }
+}
+
+/** 输入/输出 JSON 美化：合法 JSON 两空格缩进，其余按原文。 */
+function fmtJSON(s: string): string {
+  if (!s || !s.trim()) return '（无）'
+  try {
+    return JSON.stringify(JSON.parse(s), null, 2)
+  } catch {
+    return s
+  }
 }
 
 // ===================== 工具节点展开态（无箭头 icon，点击卡片本身切换） =====================
@@ -203,18 +271,35 @@ function truncate(s: string, n = 110): string {
               :key="ti"
               class="tool-node"
               :class="{ running: seg.running, open: expanded.has(keyOf(si, ti)) }"
-              @click="toggle(si, ti)"
             >
-              <div class="tn-head">
+              <!-- 点击 header 收起/展开；文件路径单独可点（在右面板打开） -->
+              <div class="tn-head" @click="toggle(si, ti)">
                 <span class="tn-ico"><component :is="toolIcon(tc.name)" :size="14" /></span>
-                <span class="tn-name">{{ toolLabel(tc.name) }}</span>
-                <span class="tn-arg muted">{{ truncate(tc.input) }}</span>
+                <span class="tn-name">{{ toolSummary(tc).title }}</span>
+                <span
+                  v-if="toolSummary(tc).path"
+                  class="tn-path"
+                  :title="`在右侧面板查看 ${toolSummary(tc).path}`"
+                  @click.stop="emit('open-file', toolSummary(tc).path!)"
+                >{{ toolSummary(tc).path }}</span>
                 <Loader2 v-if="seg.running" :size="13" class="spin tn-state" />
-                <Check v-else :size="13" class="tn-state tn-done" />
+                <ChevronDown
+                  v-else
+                  :size="14"
+                  class="tn-state tn-chev"
+                  :class="{ flip: expanded.has(keyOf(si, ti)) }"
+                />
               </div>
-              <pre v-if="expanded.has(keyOf(si, ti))" class="tn-body">输入: {{ tc.input || '（无）' }}
-
-输出: {{ tc.output || '' }}</pre>
+              <div v-if="expanded.has(keyOf(si, ti))" class="tn-body">
+                <div class="tn-sec">
+                  <div class="tn-sec-title">输入</div>
+                  <pre class="tn-json">{{ fmtJSON(tc.input) }}</pre>
+                </div>
+                <div class="tn-sec">
+                  <div class="tn-sec-title">输出</div>
+                  <pre class="tn-json">{{ fmtJSON(tc.output) }}</pre>
+                </div>
+              </div>
             </div>
           </div>
         </template>

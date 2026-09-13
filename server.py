@@ -57,6 +57,52 @@ def _save_models(models: list[str]) -> None:
     with open(_MODELS_PATH, "w") as f:
         json.dump(models, f, ensure_ascii=False, indent=2)
 
+
+_PROVIDERS_PATH = os.path.join(config.DATA_DIR, "providers.json")
+
+
+def _load_providers() -> list[dict]:
+    """自定义模型提供商：[{name, base_url, api_key, models: []}]，默认提供商走 .env。"""
+    try:
+        with open(_PROVIDERS_PATH) as f:
+            arr = json.load(f)
+        if isinstance(arr, list):
+            return [p for p in arr if isinstance(p, dict) and str(p.get("name") or "").strip()]
+    except Exception:
+        pass
+    return []
+
+
+def _save_providers(ps: list[dict]) -> None:
+    with open(_PROVIDERS_PATH, "w") as f:
+        json.dump(ps, f, ensure_ascii=False, indent=2)
+    try:
+        os.chmod(_PROVIDERS_PATH, 0o600)  # 含 api_key，收紧权限
+    except Exception:
+        pass
+
+
+def _provider_public(p: dict) -> dict:
+    """脱敏视图：不回传完整 api_key。"""
+    key = str(p.get("api_key") or "")
+    return {
+        "name": p.get("name"),
+        "base_url": p.get("base_url", ""),
+        "has_key": bool(key),
+        "key_hint": f"…{key[-4:]}" if key else "",
+        "models": list(p.get("models") or []),
+    }
+
+
+def _resolve_provider(name: str) -> tuple[str | None, str | None]:
+    """模型名 → (base_url, api_key)。默认表命中返回 (None,None) 走 .env；否则查自定义提供商。"""
+    if name in _load_models():
+        return (None, None)
+    for p in _load_providers():
+        if name in (p.get("models") or []):
+            return (p.get("base_url") or None, p.get("api_key") or None)
+    return (None, None)
+
 # ---- 全局单例 ----
 registry = SkillRegistry(config.DATA_DIR)
 store = ConversationStore(config.DATA_DIR)
@@ -543,12 +589,13 @@ def api_lib_delete(iid: str):
 # ===================== 工作台：运行时信息 =====================
 @app.get("/api/runtime", dependencies=[Depends(require_auth)])
 def api_runtime():
-    """顶部工具栏所需：当前模型、可用模型列表、技能统计等。"""
+    """顶部工具栏所需：当前模型、可用模型列表、模型提供商、技能统计等。"""
     skills = registry.list()
     return {
         "model": agent_manager.model_name if agent_manager else config.MODEL,
-        "base_url": config.OPENAI_BASE_URL,
+        "base_url": agent_manager.base_url if agent_manager else config.OPENAI_BASE_URL,
         "models": _load_models(),
+        "providers": [_provider_public(p) for p in _load_providers()],
         "temperature": config.TEMPERATURE,
         "skills_total": len(skills),
         "skills_enabled": sum(1 for s in skills if s.get("enabled")),
@@ -561,32 +608,45 @@ def api_runtime():
 
 @app.post("/api/runtime/model", dependencies=[Depends(require_auth)])
 async def api_set_model(body: dict):
-    """切换当前使用的模型（仅影响之后新建的对话轮次）。"""
+    """切换当前使用的模型（仅影响之后新建的对话轮次）；跨提供商模型联动 base_url/api_key。"""
     name = (body.get("model") or "").strip()
     if not name:
         return {"ok": False, "error": "模型名不能为空"}
-    if name not in _load_models():
+    base_url, api_key = _resolve_provider(name)
+    if base_url is None and api_key is None and name not in _load_models():
         return {"ok": False, "error": f"模型 {name} 不在可用列表中，请先添加"}
     if agent_manager is None:
         return {"ok": False, "error": "Agent 尚未初始化"}
-    agent_manager.set_model(name)
-    return {"ok": True, "model": name}
+    agent_manager.set_model(name, base_url=base_url, api_key=api_key)
+    return {"ok": True, "model": name, "base_url": agent_manager.base_url}
 
 
 @app.post("/api/runtime/models", dependencies=[Depends(require_auth)])
 async def api_add_model(body: dict):
-    """向可用模型表添加一个模型名（OpenAI 兼容模型名，持久化保存）。"""
+    """向可用模型表添加一个模型名；body.provider 指定归属的自定义提供商（缺省为默认组）。"""
     name = (body.get("name") or body.get("model") or "").strip()
     if not name:
         return {"ok": False, "error": "模型名不能为空"}
     if len(name) > 120 or any(ch in name for ch in " \t\r\n"):
         return {"ok": False, "error": "模型名不合法（不得含空白，≤120 字符）"}
-    models = _load_models()
-    if name in models:
-        return {"ok": False, "error": "模型已存在"}
-    models.append(name)
-    _save_models(models)
-    return {"ok": True, "models": models}
+    provider = (body.get("provider") or "").strip()
+    if not provider:
+        models = _load_models()
+        if name in models:
+            return {"ok": False, "error": "模型已存在"}
+        models.append(name)
+        _save_models(models)
+        return {"ok": True, "models": models}
+    ps = _load_providers()
+    p = next((x for x in ps if x.get("name") == provider), None)
+    if p is None:
+        return {"ok": False, "error": f"提供商 {provider} 不存在"}
+    p.setdefault("models", [])
+    if name in p["models"]:
+        return {"ok": False, "error": "该提供商下已有同名模型"}
+    p["models"].append(name)
+    _save_providers(ps)
+    return {"ok": True, "providers": [_provider_public(x) for x in ps]}
 
 
 @app.delete("/api/runtime/models/{name}", dependencies=[Depends(require_auth)])
@@ -600,6 +660,63 @@ def api_del_model(name: str):
     if agent_manager and agent_manager.model_name == name and models:
         agent_manager.set_model(models[0])
     return {"ok": True, "models": models, "model": agent_manager.model_name if agent_manager else None}
+
+
+@app.post("/api/runtime/providers", dependencies=[Depends(require_auth)])
+async def api_add_provider(body: dict):
+    """添加模型提供商（OpenAI 兼容接口）：name 唯一、base_url 必须是 http(s) 地址。"""
+    name = (body.get("name") or "").strip()
+    base_url = (body.get("base_url") or "").strip()
+    api_key = (body.get("api_key") or "").strip()
+    if not name or len(name) > 60:
+        return {"ok": False, "error": "提供商名称不能为空（≤60 字符）"}
+    if name.lower() == "default":
+        return {"ok": False, "error": "default 为内置默认提供商，请换一个名称"}
+    if not base_url.lower().startswith(("http://", "https://")):
+        return {"ok": False, "error": "接口地址需以 http:// 或 https:// 开头"}
+    ps = _load_providers()
+    if any(p.get("name") == name for p in ps):
+        return {"ok": False, "error": f"提供商 {name} 已存在"}
+    ps.append({"name": name, "base_url": base_url, "api_key": api_key, "models": []})
+    _save_providers(ps)
+    return {"ok": True, "providers": [_provider_public(p) for p in ps]}
+
+
+@app.delete("/api/runtime/providers/{name}", dependencies=[Depends(require_auth)])
+def api_del_provider(name: str):
+    ps = _load_providers()
+    p = next((x for x in ps if x.get("name") == name), None)
+    if p is None:
+        return {"ok": False, "error": "提供商不存在"}
+    ps.remove(p)
+    _save_providers(ps)
+    # 正用着该提供商下的模型时，回退到默认表第一个
+    if agent_manager and name not in {x["name"] for x in ps}:
+        cur = agent_manager.model_name
+        if cur in (p.get("models") or []):
+            fallback = _load_models()
+            if fallback:
+                agent_manager.set_model(fallback[0])
+    return {"ok": True, "providers": [_provider_public(x) for x in ps],
+            "model": agent_manager.model_name if agent_manager else None}
+
+
+@app.delete("/api/runtime/providers/{name}/models/{model}", dependencies=[Depends(require_auth)])
+def api_del_provider_model(name: str, model: str):
+    ps = _load_providers()
+    p = next((x for x in ps if x.get("name") == name), None)
+    if p is None:
+        return {"ok": False, "error": "提供商不存在"}
+    models = p.get("models") or []
+    if model not in models:
+        return {"ok": False, "error": "该提供商下没有此模型"}
+    models.remove(model)
+    p["models"] = models
+    _save_providers(ps)
+    if agent_manager and agent_manager.model_name == model and _load_models():
+        agent_manager.set_model(_load_models()[0])
+    return {"ok": True, "providers": [_provider_public(x) for x in ps],
+            "model": agent_manager.model_name if agent_manager else None}
 
 
 # ===================== 会话管理（会话归属当前用户） =====================

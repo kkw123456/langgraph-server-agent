@@ -51,7 +51,7 @@ onMounted(async () => {
       </div>
     </div>
 
-    <div class="page-body page-body-flush">
+    <div class="page-body page-body-flush experts-body">
       <NTabs v-model:value="tab" type="line" size="medium" class="experts-tabs">
         <NTabPane name="skills">
           <template #tab><span class="tab-label"><Puzzle :size="15" /> 技能</span></template>
