@@ -25,8 +25,34 @@ function ensureFileViewer(): Promise<void> {
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
-  NButton, NScrollbar, NEmpty, useMessage,
+  NButton, NScrollbar, NEmpty, NSkeleton, useMessage,
 } from 'naive-ui'
+import hljs from 'highlight.js/lib/core'
+import python from 'highlight.js/lib/languages/python'
+import javascript from 'highlight.js/lib/languages/javascript'
+import typescript from 'highlight.js/lib/languages/typescript'
+import json from 'highlight.js/lib/languages/json'
+import cssLang from 'highlight.js/lib/languages/css'
+import scss from 'highlight.js/lib/languages/scss'
+import less from 'highlight.js/lib/languages/less'
+import xml from 'highlight.js/lib/languages/xml'
+import markdown from 'highlight.js/lib/languages/markdown'
+import sql from 'highlight.js/lib/languages/sql'
+import bash from 'highlight.js/lib/languages/bash'
+import yaml from 'highlight.js/lib/languages/yaml'
+import iniLang from 'highlight.js/lib/languages/ini'
+import goLang from 'highlight.js/lib/languages/go'
+import rust from 'highlight.js/lib/languages/rust'
+import java from 'highlight.js/lib/languages/java'
+import cLang from 'highlight.js/lib/languages/c'
+import cpp from 'highlight.js/lib/languages/cpp'
+import csharp from 'highlight.js/lib/languages/csharp'
+import php from 'highlight.js/lib/languages/php'
+import ruby from 'highlight.js/lib/languages/ruby'
+import lua from 'highlight.js/lib/languages/lua'
+import dockerfile from 'highlight.js/lib/languages/dockerfile'
+import diff from 'highlight.js/lib/languages/diff'
+import 'highlight.js/styles/github-dark.css'
 import {
   PanelRightClose, PanelRightOpen,
   FileText, FolderClosed, GitCompare, Maximize2, Minimize2, Plus, RotateCw, Sparkles,
@@ -37,11 +63,36 @@ import {
   sendText,
 } from '../store'
 import { toolLabel } from '../utils/toolLabels'
+import { extOf } from '../utils/fileicons'
 import { useBreakpoint } from '../composables/useBreakpoint'
 import ChatWindow from '../components/ChatWindow.vue'
 import FilePanel from '../components/FilePanel.vue'
 import ToolConfirm from '../components/ToolConfirm.vue'
 import { api } from '../api'
+
+// ---- highlight.js 代码高亮（#66）：按需注册常用语言，控制 bundle 体积 ----
+import type { LanguageFn } from 'highlight.js'
+const HL_LANGS: Record<string, LanguageFn> = {
+  python, javascript, typescript, json, css: cssLang, scss, less, xml, markdown,
+  sql, bash, yaml, ini: iniLang, go: goLang, rust, java, c: cLang, cpp,
+  csharp, php, ruby, lua, dockerfile, diff,
+}
+for (const [n, l] of Object.entries(HL_LANGS)) hljs.registerLanguage(n, l)
+
+// 扩展名 → hljs 语言
+const EXT_LANG: Record<string, string> = {
+  py: 'python', js: 'javascript', mjs: 'javascript', cjs: 'javascript', jsx: 'javascript',
+  ts: 'typescript', tsx: 'typescript', json: 'json', jsonc: 'json', css: 'css',
+  scss: 'scss', sass: 'scss', less: 'less', html: 'xml', htm: 'xml', xml: 'xml',
+  svg: 'xml', vue: 'xml', md: 'markdown', markdown: 'markdown', mdx: 'markdown',
+  sql: 'sql', sh: 'bash', bash: 'bash', zsh: 'bash', yml: 'yaml', yaml: 'yaml',
+  toml: 'ini', ini: 'ini', cfg: 'ini', conf: 'ini', go: 'go', rs: 'rust',
+  java: 'java', c: 'c', h: 'c', cpp: 'cpp', cc: 'cpp', cxx: 'cpp', hpp: 'cpp',
+  cs: 'csharp', php: 'php', rb: 'ruby', lua: 'lua', ipynb: 'json',
+  dockerfile: 'dockerfile', patch: 'diff',
+}
+// 超过该大小不做高亮（防大文件卡顿），降级纯文本
+const HL_HIGHLIGHT_MAX = 400 * 1024
 
 const props = defineProps<{ showRight?: boolean }>()
 
@@ -76,6 +127,21 @@ const activeTab = ref<string | null>(null)
 const tabLoading = ref(false)
 
 const activeTabData = computed(() => openTabs.value.find((t) => t.path === activeTab.value) ?? null)
+
+/** 代码高亮视图（#66）：可高亮语言 + 内容不超阈值时返回 {html, lines, label}，否则纯文本。 */
+const hlResult = computed(() => {
+  const d = activeTabData.value
+  if (!d || d.binary || !d.content) return null
+  const lang = EXT_LANG[extOf(d.name)]
+  if (!lang || d.content.length > HL_HIGHLIGHT_MAX) return null
+  try {
+    const html = hljs.highlight(d.content, { language: lang, ignoreIllegals: true }).value
+    const n = d.content.split('\n').length
+    return { html, lines: Array.from({ length: n }, (_, i) => i + 1).join('\n'), label: lang }
+  } catch {
+    return null
+  }
+})
 const tabsEl = ref<HTMLElement | null>(null)
 // 文件标签栏：鼠标滚轮横向滚动（标签多时不挤爆面板）
 function onTabsWheel(e: WheelEvent): void {
@@ -164,6 +230,39 @@ function showSide(key: SideView): void {
   sideView.value = key
   activeTab.value = null
 }
+
+// ---- 头部功能图标的 hover 下拉（JS 延迟开合 + 进入坐标判定）----
+// 纯 CSS :hover 会在大面板覆盖主体内容时形成死锁（鼠标落在被覆盖的
+// 内容上 = 仍在 host 内，面板永不关闭、点击永远被拦截），改为定时器控制：
+// 悬停 120ms 展开；离开图标/面板 120ms 后收起。
+// 面板的 mouseenter 只有在「从图标方向进入」（Y 坐标接近 host 底部）时才
+// 取消收起——防止鼠标从主体内容直接跳入面板深处造成永久拦截。
+const flyKey = ref<SideView | null>(null)
+let flyOpenTimer = 0
+let flyCloseTimer = 0
+function openFly(key: SideView): void {
+  // 无预览标签时功能面板已常驻主体，弹出只会重复且会遮挡文件树（hover 死锁），
+  // 仅在有预览标签占用主体时才启用 hover 弹出快速浏览。
+  if (!activeTabData.value) return
+  clearTimeout(flyCloseTimer)
+  clearTimeout(flyOpenTimer)
+  flyOpenTimer = window.setTimeout(() => { flyKey.value = key }, 120)
+}
+function scheduleCloseFly(): void {
+  clearTimeout(flyOpenTimer)
+  clearTimeout(flyCloseTimer)
+  flyCloseTimer = window.setTimeout(() => { flyKey.value = null }, 120)
+}
+function onFlyEnter(e: MouseEvent): void {
+  const host = (e.currentTarget as HTMLElement).closest('.ph-host') as HTMLElement | null
+  const bottom = host ? host.getBoundingClientRect().bottom : 0
+  // 从上方（图标/桥接区/面板顶部边缘）进入：合法悬停，取消收起
+  if (e.clientY <= bottom + 28) clearTimeout(flyCloseTimer)
+}
+onBeforeUnmount(() => {
+  clearTimeout(flyOpenTimer)
+  clearTimeout(flyCloseTimer)
+})
 
 function fmtSize(n: number): string {
   if (n < 1024) return `${n} B`
@@ -422,47 +521,57 @@ onBeforeUnmount(() => {
         @mousedown.prevent="startResize"
       ></div>
 
-      <!-- 头部：有预览标签时功能图标移到头部（hover 下拉面板），中间是手写预览 tabs -->
+      <!-- 头部：功能图标常驻（#62），中间是手写预览 tabs（有预览标签时显示） -->
       <div class="panel-head">
-        <template v-if="activeTabData">
-          <div v-for="v in sideIcons" :key="v.key" class="ph-host">
-            <button class="ph-ico" :title="v.label" @click="showSide(v.key)">
-              <component :is="v.icon" :size="16" />
-            </button>
-            <!-- hover 下拉出对应功能面板 -->
-            <div class="ph-fly">
-              <div class="ph-fly-body">
-                <div v-if="v.key === 'artifacts'" class="artifact-list ph-fly-list">
-                  <template v-if="artifacts.length">
-                    <div v-for="(a, i) in artifacts" :key="i" class="artifact-card">
-                      <span class="ac-ico"><Sparkles :size="15" /></span>
-                      <span class="ac-body">
-                        <div class="ac-name">{{ toolLabel(a.name) }}</div>
-                        <div class="ac-meta muted">{{ a.name }}</div>
-                      </span>
-                    </div>
-                  </template>
-                  <NEmpty v-else class="page-empty" description="本轮还没有产生结果" />
-                </div>
-                <FilePanel v-else @open="openPreviewTab" />
+        <div
+          v-for="v in sideIcons"
+          :key="v.key"
+          class="ph-host"
+          :class="{ open: flyKey === v.key }"
+          @mouseenter="openFly(v.key)"
+          @mouseleave="scheduleCloseFly"
+        >
+          <button
+            class="ph-ico"
+            :class="{ active: !activeTabData && sideView === v.key }"
+            :title="v.label"
+            @click="showSide(v.key)"
+          >
+            <component :is="v.icon" :size="16" />
+          </button>
+          <!-- hover 下拉出对应功能面板（JS 延迟开合，防大面板误触遮挡主体） -->
+          <div class="ph-fly" @mouseenter="onFlyEnter" @mouseleave="scheduleCloseFly">
+            <div class="ph-fly-body">
+              <div v-if="v.key === 'artifacts'" class="artifact-list ph-fly-list">
+                <template v-if="artifacts.length">
+                  <div v-for="(a, i) in artifacts" :key="i" class="artifact-card">
+                    <span class="ac-ico"><Sparkles :size="15" /></span>
+                    <span class="ac-body">
+                      <div class="ac-name">{{ toolLabel(a.name) }}</div>
+                      <div class="ac-meta muted">{{ a.name }}</div>
+                    </span>
+                  </div>
+                </template>
+                <NEmpty v-else class="page-empty" description="本轮还没有产生结果" />
               </div>
+              <FilePanel v-else @open="openPreviewTab" />
             </div>
           </div>
-          <div ref="tabsEl" class="pv-tabs" @wheel="onTabsWheel">
-            <span
-              v-for="t in openTabs"
-              :key="t.path"
-              class="pv-tab"
-              :class="{ active: t.path === activeTab }"
-              :title="t.path"
-              @click="activeTab = t.path"
-            >
-              <FileText :size="12" />
-              <span class="pv-tab-name">{{ t.name }}</span>
-              <X :size="11" class="pv-tab-x" @click.stop="closeTab(t.path)" />
-            </span>
-          </div>
-        </template>
+        </div>
+        <div v-if="activeTabData" ref="tabsEl" class="pv-tabs" @wheel="onTabsWheel">
+          <span
+            v-for="t in openTabs"
+            :key="t.path"
+            class="pv-tab"
+            :class="{ active: t.path === activeTab }"
+            :title="t.path"
+            @click="activeTab = t.path"
+          >
+            <FileText :size="12" />
+            <span class="pv-tab-name">{{ t.name }}</span>
+            <X :size="11" class="pv-tab-x" @click.stop="closeTab(t.path)" />
+          </span>
+        </div>
         <div class="rp-actions">
           <!-- 覆盖层模式下头部开关被面板盖住，提供面板内关闭入口 -->
           <NButton v-if="overlay" quaternary circle size="small" title="关闭面板" @click="state.rightOpen = false">
@@ -482,43 +591,33 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <!-- 主体 -->
+      <!-- 主体：功能面板常驻（图标条已移至头部 #62）；有预览标签时显示文件预览 -->
       <div class="rp-wrap">
-        <!-- 无预览标签：左侧功能图标条 + 对应面板常驻（即「下拉放到面板里面」） -->
-        <template v-if="!activeTabData">
-          <div class="rp-side">
-            <button
-              v-for="v in sideIcons"
-              :key="v.key"
-              class="rp-side-ico"
-              :class="{ active: sideView === v.key }"
-              :title="v.label"
-              @click="sideView = v.key"
-            >
-              <component :is="v.icon" :size="17" />
-            </button>
-          </div>
-          <div class="rp-content">
-            <!-- 产物 -->
-            <div v-if="sideView === 'artifacts'" class="artifact-pane">
-              <div v-if="artifacts.length" class="artifact-list">
-                <div v-for="(a, i) in artifacts" :key="i" class="artifact-card">
-                  <span class="ac-ico"><Sparkles :size="15" /></span>
-                  <span class="ac-body">
-                    <div class="ac-name">{{ toolLabel(a.name) }}</div>
-                    <div class="ac-meta muted">{{ a.name }}</div>
-                  </span>
-                </div>
+        <!-- 功能面板：产物 / 所有文件 / 变更预览 -->
+        <div v-if="!activeTabData" class="rp-content">
+          <!-- 产物 -->
+          <div v-if="sideView === 'artifacts'" class="artifact-pane">
+            <div v-if="artifacts.length" class="artifact-list">
+              <div v-for="(a, i) in artifacts" :key="i" class="artifact-card">
+                <span class="ac-ico"><Sparkles :size="15" /></span>
+                <span class="ac-body">
+                  <div class="ac-name">{{ toolLabel(a.name) }}</div>
+                  <div class="ac-meta muted">{{ a.name }}</div>
+                </span>
               </div>
-              <NEmpty v-else class="page-empty" description="本轮还没有产生结果" />
             </div>
-            <!-- 所有文件 / 变更预览：文件树，点击文件打开预览标签 -->
-            <FilePanel v-else @open="openPreviewTab" />
+            <NEmpty v-else class="page-empty" description="本轮还没有产生结果" />
           </div>
-        </template>
+          <!-- 所有文件 / 变更预览：文件树，点击文件打开预览标签 -->
+          <FilePanel v-else @open="openPreviewTab" />
+        </div>
         <!-- 文件预览：文本直接渲染，其他格式走 file-viewer -->
         <template v-else>
-          <div v-if="tabLoading" class="file-hint muted">加载中…</div>
+          <!-- 预览加载骨架（#65） -->
+          <div v-if="tabLoading" class="pv-skeleton" aria-label="加载中">
+            <NSkeleton width="38%" height="13px" :sharp="false" />
+            <NSkeleton v-for="i in 7" :key="i" :width="i % 3 === 0 ? '62%' : i % 3 === 1 ? '92%' : '78%'" height="12px" :sharp="false" />
+          </div>
           <template v-else-if="activeTabData">
             <div v-if="activeTabData.binary" class="pv-viewer">
               <flyfish-file-viewer
@@ -536,7 +635,15 @@ onBeforeUnmount(() => {
                 <a :href="downloadUrl(activeTabData.path)" target="_blank" rel="noopener">下载完整文件</a>
               </div>
               <NScrollbar class="pv-scroll">
-                <pre class="file-content">{{ activeTabData.content }}</pre>
+                <!-- 代码高亮视图（#66）：行号列 + 语言标签；不可高亮时降级纯文本 -->
+                <div v-if="hlResult" class="code-view">
+                  <span class="code-lang">{{ hlResult.label }}</span>
+                  <div class="code-flex">
+                    <pre class="code-gutter"><code>{{ hlResult.lines }}</code></pre>
+                    <pre class="code-body"><code class="hljs" v-html="hlResult.html"></code></pre>
+                  </div>
+                </div>
+                <pre v-else class="file-content">{{ activeTabData.content }}</pre>
               </NScrollbar>
             </template>
           </template>

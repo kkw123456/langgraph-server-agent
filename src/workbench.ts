@@ -6,7 +6,7 @@ import { reactive } from 'vue'
 import { api } from './api'
 import { message as toast } from './main'
 import type {
-  Project, Automation, LibraryItem, RuntimeInfo, RuntimeProvider, AutoSchedule,
+  Project, Automation, LibraryItem, RuntimeInfo, RuntimeProvider, AutoSchedule, UserInfo,
 } from './types'
 
 interface WorkbenchState {
@@ -14,11 +14,13 @@ interface WorkbenchState {
   automations: Automation[]
   library: LibraryItem[]
   runtime: RuntimeInfo
+  users: UserInfo[]          // 用户列表（admin 管理，#69）
   loading: boolean
   /** 各域首载骨架屏开关：仅在列表为空时置位，避免轮询刷新闪烁 */
   loadingProjects: boolean
   loadingAutomations: boolean
   loadingLibrary: boolean
+  loadingUsers: boolean
 }
 
 export const wb = reactive<WorkbenchState>({
@@ -26,10 +28,12 @@ export const wb = reactive<WorkbenchState>({
   automations: [],
   library: [],
   runtime: { model: '', models: [], skills_enabled: 0, skills_total: 0 },
+  users: [],
   loading: false,
   loadingProjects: false,
   loadingAutomations: false,
   loadingLibrary: false,
+  loadingUsers: false,
 })
 
 // ===================== 项目空间 =====================
@@ -204,13 +208,14 @@ export async function setModel(name: string): Promise<boolean> {
   return true
 }
 
-/** 添加模型到可用列表（持久化到服务端）；provider 非空时挂到该自定义提供商下。 */
-export async function addModel(name: string, provider = ''): Promise<boolean> {
+/** 添加模型到可用列表（持久化到服务端）；provider 非空时挂到该自定义提供商下。
+ *  scope: 'system'（admin 可管理，全员可见）/ 'user'（私有，默认）。 */
+export async function addModel(name: string, provider = '', scope: 'system' | 'user' = 'user'): Promise<boolean> {
   const n = (name || '').trim()
   if (!n) return false
   const r = await api.post<{
     ok: boolean; models?: string[]; providers?: RuntimeProvider[]; error?: string
-  }>('/api/runtime/models', { name: n, provider })
+  }>('/api/runtime/models', { name: n, provider, scope })
   if (!r.ok) {
     toast.error(r.error || '添加失败')
     return false
@@ -222,10 +227,10 @@ export async function addModel(name: string, provider = ''): Promise<boolean> {
 }
 
 /** 从可用列表移除模型；provider 非空时从该自定义提供商下移除。 */
-export async function removeModel(name: string, provider = ''): Promise<boolean> {
+export async function removeModel(name: string, provider = '', scope: 'system' | 'user' = 'user'): Promise<boolean> {
   const url = provider
-    ? `/api/runtime/providers/${encodeURIComponent(provider)}/models/${encodeURIComponent(name)}`
-    : `/api/runtime/models/${encodeURIComponent(name)}`
+    ? `/api/runtime/providers/${encodeURIComponent(provider)}/models/${encodeURIComponent(name)}?scope=${scope}`
+    : `/api/runtime/models/${encodeURIComponent(name)}?scope=${scope}`
   const r = await api.del<{
     ok: boolean; models?: string[]; providers?: RuntimeProvider[]; model?: string; error?: string
   }>(url)
@@ -239,11 +244,14 @@ export async function removeModel(name: string, provider = ''): Promise<boolean>
   return true
 }
 
-/** 添加模型提供商（OpenAI 兼容接口：名称 + 地址 + 密钥）。 */
-export async function addProvider(name: string, baseUrl: string, apiKey = ''): Promise<boolean> {
+/** 添加模型提供商（OpenAI 兼容接口：名称 + 地址 + 密钥）。
+ *  scope: 'system'（admin 专属）/ 'user'（私有，默认）。 */
+export async function addProvider(
+  name: string, baseUrl: string, apiKey = '', scope: 'system' | 'user' = 'user',
+): Promise<boolean> {
   const r = await api.post<{ ok: boolean; providers?: RuntimeProvider[]; error?: string }>(
     '/api/runtime/providers',
-    { name: (name || '').trim(), base_url: (baseUrl || '').trim(), api_key: (apiKey || '').trim() },
+    { name: (name || '').trim(), base_url: (baseUrl || '').trim(), api_key: (apiKey || '').trim(), scope },
   )
   if (!r.ok) {
     toast.error(r.error || '添加提供商失败')
@@ -255,16 +263,53 @@ export async function addProvider(name: string, baseUrl: string, apiKey = ''): P
 }
 
 /** 删除模型提供商（其下模型一并移除；正用的模型会回退到默认表）。 */
-export async function removeProvider(name: string): Promise<boolean> {
+export async function removeProvider(name: string, scope: 'system' | 'user' = 'user'): Promise<boolean> {
   const r = await api.del<{
     ok: boolean; providers?: RuntimeProvider[]; model?: string; error?: string
-  }>(`/api/runtime/providers/${encodeURIComponent(name)}`)
+  }>(`/api/runtime/providers/${encodeURIComponent(name)}?scope=${scope}`)
   if (!r.ok) {
     toast.error(r.error || '删除失败')
     return false
   }
   wb.runtime.providers = r.providers || []
   if (r.model) wb.runtime.model = r.model
+  return true
+}
+
+// ===================== 用户管理（admin 专属，#69） =====================
+export async function loadUsers(): Promise<void> {
+  const first = wb.users.length === 0
+  if (first) wb.loadingUsers = true
+  try {
+    const r = await api.get<UserInfo[] | { ok: false }>('/api/users')
+    wb.users = Array.isArray(r) ? r : []
+  } catch { /* 非 admin 会 403，静默 */ } finally {
+    wb.loadingUsers = false
+  }
+}
+
+export async function createUser(
+  username: string, password: string, role: 'admin' | 'user' = 'user',
+): Promise<boolean> {
+  const r = await api.post<{ ok: boolean; error?: string }>('/api/users', { username, password, role })
+  if (!r.ok) {
+    toast.error(r.error || '创建失败')
+    return false
+  }
+  await loadUsers()
+  toast.success(`已创建用户 ${username}`)
+  return true
+}
+
+export async function deleteUser(username: string): Promise<boolean> {
+  const r = await api.del<{ ok: boolean; error?: string }>(
+    `/api/users/${encodeURIComponent(username)}`,
+  )
+  if (!r.ok) {
+    toast.error(r.error || '删除失败')
+    return false
+  }
+  await loadUsers()
   return true
 }
 

@@ -237,6 +237,12 @@ body {
 .cs-item-title { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cs-item-time { font-size: 11px; color: var(--muted); margin-top: 1px; }
 .cs-rename-input { margin: 1px 0; }
+
+/* 会话列表骨架屏（#61） */
+.cs-skeleton { display: flex; flex-direction: column; gap: 4px; padding: 10px 4px; }
+.cs-skel-item { display: flex; align-items: center; gap: 8px; padding: 7px 8px; }
+.cs-skel-ico { flex: 0 0 auto; }
+.cs-skel-main { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 0; }
 .cs-item-actions {
   display: flex; align-items: center; gap: 2px; flex: 0 0 auto;
   opacity: 0; transition: opacity .12s;
@@ -395,6 +401,14 @@ body {
 
 /* ---- 等待模型回复的 shimmer 占位 ---- */
 .waiting-bubble { display: inline-flex; align-items: center; gap: 10px; }
+
+/* ---- 消息区骨架屏（#60）：模拟对话布局 ---- */
+.msg-skeleton { display: flex; flex-direction: column; gap: 22px; padding: 18px 4px; }
+.skel-row { display: flex; align-items: flex-start; gap: 10px; }
+.skel-row.mine { flex-direction: row-reverse; }
+.skel-avatar { flex: 0 0 auto; margin-top: 2px; }
+.skel-bubbles { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.skel-row.mine .skel-bubbles { align-items: flex-end; }
 .waiting-text { font-size: 13px; font-weight: 550; color: var(--muted); }
 .dots { display: inline-flex; gap: 4px; align-items: center; }
 .dots i {
@@ -527,11 +541,17 @@ body {
   padding: 0 8px; flex: 0 0 auto; min-width: 0;
 }
 .ph-host { position: relative; display: flex; flex: 0 0 auto; }
+.ph-host::after {
+  content: ''; position: absolute; top: 100%; left: -8px;
+  height: 8px; width: calc(100% + 16px); display: none;
+}
 .ph-ico {
   width: 30px; height: 30px; border-radius: 8px; border: none; background: transparent;
   display: flex; align-items: center; justify-content: center;
   color: var(--muted); cursor: pointer; transition: background .15s, color .15s;
   &:hover { background: var(--hover); color: var(--text); }
+  /* 功能面板常驻时（无预览标签）高亮当前视图（#62 图标移入头部） */
+  &.active { background: var(--accent-weak); color: var(--accent); }
 }
 .ph-fly {
   position: absolute; top: calc(100% + 6px); left: 0;
@@ -540,12 +560,9 @@ body {
   box-shadow: 0 12px 32px rgba(0, 0, 0, .16);
   display: none; flex-direction: column; overflow: hidden; z-index: 60;
 }
-.ph-host:hover .ph-fly, .ph-host:focus-within .ph-fly { display: flex; }
-.ph-host::after {
-  content: ''; position: absolute; top: 100%; left: -8px;
-  height: 8px; width: calc(100% + 16px); display: none;
-}
-.ph-host:hover::after { display: block; }
+/* JS 延迟开合（.open），替代纯 :hover——防大面板覆盖主体后死锁拦截点击 */
+.ph-host.open .ph-fly { display: flex; }
+.ph-host.open::after { display: block; }
 .ph-fly-body { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 .ph-fly-list { overflow-y: auto; min-height: 0; }
 
@@ -564,25 +581,48 @@ body {
 .pv-tab-x { border-radius: 4px; flex: 0 0 auto; opacity: .6; &:hover { opacity: 1; background: rgba(0, 0, 0, .08); } }
 .rp-actions { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; margin-left: auto; }
 
-/* ---- 面板主体：左侧功能图标条 + 内容 ---- */
-.rp-wrap { flex: 1; display: flex; min-height: 0; min-width: 0; }
-.rp-side {
-  flex: 0 0 44px; display: flex; flex-direction: column; align-items: center; gap: 6px;
-  padding: 10px 0; border-right: 1px solid var(--border);
-}
-.rp-side-ico {
-  width: 32px; height: 32px; border-radius: 9px; border: none; background: transparent;
-  display: flex; align-items: center; justify-content: center;
-  color: var(--muted); cursor: pointer; transition: background .15s, color .15s;
-  &:hover { background: var(--hover); color: var(--text); }
-  &.active { background: var(--accent-weak); color: var(--accent); }
-}
+/* ---- 面板主体：功能面板常驻（#62 图标条移入头部，主体仅内容） ---- */
+.rp-wrap { flex: 1; display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 .rp-content { flex: 1; display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+
+/* 预览加载骨架（#65） */
+.pv-skeleton {
+  flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px;
+  padding: 18px 20px; overflow: hidden;
+}
 
 /* 文件预览区 */
 .pv-scroll { flex: 1; min-height: 0; }
 .pv-viewer { flex: 1; min-height: 0; display: flex; }
 .pv-viewer flyfish-file-viewer { width: 100%; height: 100%; display: block; }
+
+/* 代码高亮视图（#66）：行号列 sticky 左贴边，右上角语言标签 */
+.code-view {
+  position: relative; margin: 0; min-width: 100%; display: flex;
+}
+.code-lang {
+  position: absolute; top: 8px; right: 12px; z-index: 3;
+  font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+  color: #9da5b4; background: rgba(255, 255, 255, .08);
+  border: 1px solid rgba(255, 255, 255, .12);
+  padding: 2px 7px; border-radius: 6px; pointer-events: none;
+}
+.code-flex { display: flex; align-items: flex-start; min-width: max-content; }
+.code-gutter, .code-body {
+  margin: 0; padding: 12px 0 14px; font-family: "SF Mono", Consolas, Menlo, monospace;
+  font-size: 12.5px; line-height: 1.6; background: #1e2228;
+}
+.code-gutter {
+  flex: 0 0 auto; text-align: right; color: #4d5566; user-select: none;
+  padding: 12px 10px 14px 14px; position: sticky; left: 0; z-index: 2;
+  border-right: 1px solid rgba(255, 255, 255, .07);
+  code { display: block; }
+}
+.code-body {
+  flex: 1 1 auto; min-width: 0;
+  padding: 12px 16px 14px 12px;
+  code { display: block; white-space: pre; }
+}
 
 /* 面板标签文字：宽度不足时文本截断兜底（Experts 等页仍使用） */
 .tab-label { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
@@ -896,19 +936,22 @@ body {
   background: var(--accent-weak);
 }
 
-/* ---- 消息附件卡片（用户消息下方，点击在右面板打开） ---- */
+/* ---- 消息附件卡片（用户消息下方，#64 完整文件信息 + 宽度不超气泡右界） ---- */
 .msg-attach {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 6px;
+  /* 卡片是气泡的子元素，宽度天然受 bubble 限制；确保长名换行而非撑破 */
+  min-width: 0;
 }
 .ma-card {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  max-width: 260px;
-  padding: 7px 10px;
+  gap: 9px;
+  max-width: 300px;
+  min-width: 0;
+  padding: 7px 11px;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--panel);
@@ -919,17 +962,29 @@ body {
     box-shadow: 0 2px 8px rgba(24, 160, 88, .12);
   }
 }
-.ma-ico { flex: 0 0 auto; color: var(--accent); }
-.ma-main { min-width: 0; display: flex; flex-direction: column; }
+.ma-ico-box {
+  flex: 0 0 auto;
+  width: 30px; height: 30px; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+}
+.ma-main { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .ma-name {
   font-size: 12.5px;
   font-weight: 500;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* 完整展示文件名：长名换行而不是截断（#64） */
+  word-break: break-all;
+  line-height: 1.35;
 }
-.ma-meta { font-size: 11px; color: var(--muted); }
-.ma-eye { flex: 0 0 auto; color: var(--muted); }
+.ma-meta {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11px; color: var(--muted); flex-wrap: wrap;
+}
+.ma-type {
+  font-size: 9.5px; font-weight: 700; letter-spacing: .04em;
+  padding: 1px 5px; border-radius: 5px;
+  border: 1px solid transparent;
+}
+.ma-view { display: inline-flex; align-items: center; gap: 3px; opacity: .85; }
 
 /* ---- 骨架屏辅助间距 ---- */
 .sk-title { margin-bottom: 10px; }
@@ -1052,6 +1107,20 @@ body {
 .set-prov-add { margin-top: 6px; }
 .set-prov-input { width: 200px; max-width: 100%; }
 .set-prov-url { width: 260px; }
+
+/* 设置页：模型 scope 区块头（系统模型 / 我的模型，#67） */
+.set-scope-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 12px 0 4px; margin-top: 6px;
+  border-top: 1px solid var(--border);
+}
+.set-scope-title {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 13px; font-weight: 650; color: var(--text);
+}
+.set-role-select { width: 120px; }
+.set-user-label { display: inline-flex; align-items: center; gap: 6px; }
+.set-user-name { font-weight: 600; }
 
 /* ---- 技能页：两层滚动链（page-body 为 flex 容器，sm-body 内部滚动） ---- */
 .experts-body { display: flex; flex-direction: column; }

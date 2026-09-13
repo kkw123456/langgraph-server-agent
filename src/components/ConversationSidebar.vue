@@ -8,7 +8,7 @@
 // 移动端抽屉形态：showNav=false 隐藏菜单导航，仅保留会话列表与用户菜单。
 import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { NAvatar, NButton, NDropdown, NEmpty, NInput, useDialog } from 'naive-ui'
+import { NAvatar, NButton, NDropdown, NEmpty, NInput, NSkeleton, useDialog } from 'naive-ui'
 import type { DropdownOption } from 'naive-ui'
 import {
   Bell, BookMarked, Bot, Clock, Lightbulb, Loader2, MessageSquare, MoreHorizontal,
@@ -17,6 +17,7 @@ import {
 import type { Component } from 'vue'
 import type { Conversation } from '../types'
 import { authState } from '../auth'
+import { state } from '../store'
 
 const props = defineProps<{ convs: Conversation[]; current: string | null; collapsed?: boolean; showNav?: boolean }>()
 const emit = defineEmits<{
@@ -179,7 +180,18 @@ function onUser(key: string | number): void {
       </span>
       <div class="cs-flyout">
         <div class="cs-fly-head">会话列表</div>
-        <div class="cs-fly-body">
+      <div class="cs-fly-body">
+        <!-- 首次加载骨架（#61） -->
+        <div v-if="state.convsLoading" class="cs-skeleton" aria-label="加载中">
+          <div v-for="i in 4" :key="i" class="cs-skel-item">
+            <NSkeleton circle size="small" class="cs-skel-ico" />
+            <div class="cs-skel-main">
+              <NSkeleton :width="150 - i * 12" height="12px" :sharp="false" />
+              <NSkeleton :width="64" height="10px" :sharp="false" />
+            </div>
+          </div>
+        </div>
+        <template v-else>
           <div v-for="g in groups" :key="g.label" class="cs-fly-group">
             <div class="cs-fly-group-title">{{ g.label }}</div>
             <div
@@ -203,7 +215,8 @@ function onUser(key: string | number): void {
             size="small"
             description="暂无会话"
           />
-        </div>
+        </template>
+      </div>
       </div>
     </div>
 
@@ -260,56 +273,68 @@ function onUser(key: string | number): void {
 
     <!-- 分组会话列表 -->
     <div class="cs-groups">
-      <div v-for="g in groups" :key="g.label" class="cs-group">
-        <div class="cs-group-title">{{ g.label }}</div>
-        <div
-          v-for="c in g.items"
-          :key="c.id"
-          class="cs-item"
-          :class="{ active: isHome && c.id === current }"
-          @click="renamingId !== c.id && $emit('select', c.id)"
-        >
-          <MessageSquare :size="15" class="cs-item-ico" />
-          <div class="cs-item-main">
-            <NInput
-              v-if="renamingId === c.id"
-              v-model:value="renameText"
-              size="tiny"
-              class="cs-rename-input"
-              placeholder="会话名称"
-              autofocus
-              @click.stop
-              @keyup.enter="confirmRename"
-              @keyup.esc="cancelRename"
-              @blur="confirmRename"
-            />
-            <template v-else>
-              <div class="cs-item-title" title="双击重命名" @dblclick.stop="startRename(c)">
-                {{ c.title }}
-              </div>
-              <div class="cs-item-time">{{ relTime(c.updated_at) }}</div>
-            </template>
-          </div>
-          <Loader2 v-if="c.running" :size="14" class="spin cs-run-ico" title="正在回复" />
-          <div class="cs-item-actions" @click.stop>
-            <NDropdown
-              trigger="click"
-              :options="itemOptions"
-              @select="(k: string | number) => onItemAction(c.id, k)"
-            >
-              <NButton quaternary circle size="tiny" title="更多操作">
-                <template #icon><MoreHorizontal :size="14" /></template>
-              </NButton>
-            </NDropdown>
+      <!-- 首次加载骨架（#61） -->
+      <div v-if="state.convsLoading" class="cs-skeleton" aria-label="加载中">
+        <div v-for="i in 6" :key="i" class="cs-skel-item">
+          <NSkeleton circle size="small" class="cs-skel-ico" />
+          <div class="cs-skel-main">
+            <NSkeleton :width="170 - (i % 3) * 28" height="12px" :sharp="false" />
+            <NSkeleton :width="64" height="10px" :sharp="false" />
           </div>
         </div>
       </div>
-      <NEmpty
-        v-if="!hasConvs"
-        class="cs-empty"
-        size="small"
-        :description="kw.trim() ? '无匹配会话' : '暂无会话，点上方「新建任务」开始'"
-      />
+      <template v-else>
+        <div v-for="g in groups" :key="g.label" class="cs-group">
+          <div class="cs-group-title">{{ g.label }}</div>
+          <div
+            v-for="c in g.items"
+            :key="c.id"
+            class="cs-item"
+            :class="{ active: isHome && c.id === current }"
+            @click="renamingId !== c.id && $emit('select', c.id)"
+          >
+            <MessageSquare :size="15" class="cs-item-ico" />
+            <div class="cs-item-main">
+              <NInput
+                v-if="renamingId === c.id"
+                v-model:value="renameText"
+                size="tiny"
+                class="cs-rename-input"
+                placeholder="会话名称"
+                autofocus
+                @click.stop
+                @keyup.enter="confirmRename"
+                @keyup.esc="cancelRename"
+                @blur="confirmRename"
+              />
+              <template v-else>
+                <div class="cs-item-title" title="双击重命名" @dblclick.stop="startRename(c)">
+                  {{ c.title }}
+                </div>
+                <div class="cs-item-time">{{ relTime(c.updated_at) }}</div>
+              </template>
+            </div>
+            <Loader2 v-if="c.running" :size="14" class="spin cs-run-ico" title="正在回复" />
+            <div class="cs-item-actions" @click.stop>
+              <NDropdown
+                trigger="click"
+                :options="itemOptions"
+                @select="(k: string | number) => onItemAction(c.id, k)"
+              >
+                <NButton quaternary circle size="tiny" title="更多操作">
+                  <template #icon><MoreHorizontal :size="14" /></template>
+                </NButton>
+              </NDropdown>
+            </div>
+          </div>
+        </div>
+        <NEmpty
+          v-if="!hasConvs"
+          class="cs-empty"
+          size="small"
+          :description="kw.trim() ? '无匹配会话' : '暂无会话，点上方「新建任务」开始'"
+        />
+      </template>
     </div>
 
     <!-- 底部用户菜单 -->

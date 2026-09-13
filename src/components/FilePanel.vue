@@ -5,12 +5,13 @@
 import { ref, watch, computed } from 'vue'
 import { NButton, NEmpty, NScrollbar, NAlert } from 'naive-ui'
 import {
-  RotateCw, Download, FileText, FolderClosed, FolderOpen, Package,
+  RotateCw, Download, FolderClosed, FolderOpen,
   ChevronRight, ChevronDown,
 } from 'lucide-vue-next'
 import { state } from '../store'
 import type { FileEntry, FileResponse } from '../types'
 import { api } from '../api'
+import { fileIcon } from '../utils/fileicons'
 
 const emit = defineEmits<{ open: [path: string] }>()
 
@@ -188,11 +189,10 @@ watch(() => state.filesTick, () => { rebuild() })
             <ChevronDown v-if="f.node.type === 'dir' && f.node.expanded" :size="13" />
             <ChevronRight v-else-if="f.node.type === 'dir'" :size="13" />
           </span>
-          <span class="fi-icon">
+          <span class="fi-icon" :style="{ color: f.node.type === 'dir' ? undefined : fileIcon(f.node.name).color }">
             <FolderOpen v-if="f.node.type === 'dir' && f.node.expanded" :size="15" />
             <FolderClosed v-else-if="f.node.type === 'dir'" :size="15" />
-            <FileText v-else-if="f.node.is_text" :size="15" />
-            <Package v-else :size="15" />
+            <component v-else :is="fileIcon(f.node.name).icon" :size="15" />
           </span>
           <span class="fi-name">{{ f.node.name }}</span>
           <span class="fi-meta muted">{{ f.node.type === 'dir' ? '' : fmtSize(f.node.size) }}</span>

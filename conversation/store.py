@@ -64,23 +64,33 @@ class ConversationStore:
         conn = self._conn()
         with conn:
             conn.executescript(SCHEMA)
-            # 旧库迁移：messages 补 reasoning/attachments，conversations 补 owner
+            # 旧库迁移：messages 补 reasoning/attachments/created_at，conversations 补 owner
             cols = [r[1] for r in conn.execute("PRAGMA table_info(messages)").fetchall()]
             if "reasoning" not in cols:
                 conn.execute("ALTER TABLE messages ADD COLUMN reasoning TEXT")
             if "attachments" not in cols:
                 conn.execute("ALTER TABLE messages ADD COLUMN attachments TEXT")
+            if "created_at" not in cols:
+                conn.execute("ALTER TABLE messages ADD COLUMN created_at REAL")
             ccols = [r[1] for r in conn.execute("PRAGMA table_info(conversations)").fetchall()]
             if "owner" not in ccols:
                 conn.execute("ALTER TABLE conversations ADD COLUMN owner TEXT NOT NULL DEFAULT ''")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_conversations_owner ON conversations(owner, updated_at)"
+            )
 
     # ---------- 元数据 ----------
-    def list(self, owner: str | None = None) -> list:
-        """列出会话；owner 非 None 时只返回该用户的（owner 为空的旧会话对所有人可见）。"""
+    def list(self, owner: str | None = None, admin: bool = False) -> list:
+        """列出会话。
+
+        - admin=True：返回全部（含 owner 为空的旧会话）。
+        - owner 给定且非 admin：严格只返回该用户自己的会话。
+        - 两者都未给：返回全部（本地未启用认证的场景）。
+        """
         sql = "SELECT id, title, created_at, updated_at, owner FROM conversations"
         args: tuple = ()
-        if owner is not None:
-            sql += " WHERE owner IN ('', ?)"
+        if owner and not admin:
+            sql += " WHERE owner = ?"
             args = (owner,)
         rows = self._conn().execute(sql + " ORDER BY updated_at DESC", args).fetchall()
         return [dict(r) for r in rows]
@@ -158,11 +168,12 @@ class ConversationStore:
     def save_messages(self, cid: str, messages: list):
         """全量覆盖写入某会话的消息列表（单事务，保证原子性）。"""
         conn = self._conn()
+        base = time.time()
         with conn:
             conn.execute("DELETE FROM messages WHERE cid = ?", (cid,))
             conn.executemany(
-                "INSERT INTO messages (cid, seq, role, content, tool_calls, reasoning, attachments) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO messages (cid, seq, role, content, tool_calls, reasoning, attachments, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 [
                     (
                         cid,
@@ -176,6 +187,7 @@ class ConversationStore:
                         json.dumps(m["attachments"], ensure_ascii=False)
                         if m.get("attachments")
                         else None,
+                        base + i * 0.001,
                     )
                     for i, m in enumerate(messages)
                 ],

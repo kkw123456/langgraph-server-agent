@@ -25,12 +25,14 @@ from skills.registry import SkillRegistry
 from agent.builder import AgentManager
 from conversation.store import ConversationStore
 from workbench_store import WorkbenchStore
+from users_store import UserStore
+from runtime_store import RuntimeStore
 import workspace
 
 # 确认模式下等待用户决策的最长等待时间（秒），超时视为全部拒绝
 MODE_TIMEOUT = 600
 
-# 顶部工具栏可切换的模型：默认表，用户可在「设置」中扩展（持久化到 data/models.json）
+# 默认模型表（.env 凭据可用）；首次启动迁移进 models 表的 system 默认组
 ALLOWED_MODELS = [
     "ark-code-latest",
     "deepseek-chat",
@@ -38,75 +40,13 @@ ALLOWED_MODELS = [
     "gpt-4o-mini",
     "gpt-4o",
 ]
-_MODELS_PATH = os.path.join(config.DATA_DIR, "models.json")
-
-
-def _load_models() -> list[str]:
-    """读取用户扩展后的模型表；文件不存在或为空时用默认表。"""
-    try:
-        with open(_MODELS_PATH) as f:
-            arr = json.load(f)
-        if isinstance(arr, list) and arr:
-            return [str(x) for x in arr if str(x).strip()]
-    except Exception:
-        pass
-    return list(ALLOWED_MODELS)
-
-
-def _save_models(models: list[str]) -> None:
-    with open(_MODELS_PATH, "w") as f:
-        json.dump(models, f, ensure_ascii=False, indent=2)
-
-
-_PROVIDERS_PATH = os.path.join(config.DATA_DIR, "providers.json")
-
-
-def _load_providers() -> list[dict]:
-    """自定义模型提供商：[{name, base_url, api_key, models: []}]，默认提供商走 .env。"""
-    try:
-        with open(_PROVIDERS_PATH) as f:
-            arr = json.load(f)
-        if isinstance(arr, list):
-            return [p for p in arr if isinstance(p, dict) and str(p.get("name") or "").strip()]
-    except Exception:
-        pass
-    return []
-
-
-def _save_providers(ps: list[dict]) -> None:
-    with open(_PROVIDERS_PATH, "w") as f:
-        json.dump(ps, f, ensure_ascii=False, indent=2)
-    try:
-        os.chmod(_PROVIDERS_PATH, 0o600)  # 含 api_key，收紧权限
-    except Exception:
-        pass
-
-
-def _provider_public(p: dict) -> dict:
-    """脱敏视图：不回传完整 api_key。"""
-    key = str(p.get("api_key") or "")
-    return {
-        "name": p.get("name"),
-        "base_url": p.get("base_url", ""),
-        "has_key": bool(key),
-        "key_hint": f"…{key[-4:]}" if key else "",
-        "models": list(p.get("models") or []),
-    }
-
-
-def _resolve_provider(name: str) -> tuple[str | None, str | None]:
-    """模型名 → (base_url, api_key)。默认表命中返回 (None,None) 走 .env；否则查自定义提供商。"""
-    if name in _load_models():
-        return (None, None)
-    for p in _load_providers():
-        if name in (p.get("models") or []):
-            return (p.get("base_url") or None, p.get("api_key") or None)
-    return (None, None)
 
 # ---- 全局单例 ----
 registry = SkillRegistry(config.DATA_DIR)
 store = ConversationStore(config.DATA_DIR)
 workbench = WorkbenchStore(config.DATA_DIR)
+users_db = UserStore(config.DATA_DIR)
+runtime = RuntimeStore(config.DATA_DIR, ALLOWED_MODELS)
 agent_manager = None  # 在 lifespan 中初始化（SqliteSaver 为异步上下文）
 
 INDEX_HTML = os.path.join("static", "index.html")  # Vue SPA 入口
@@ -125,14 +65,16 @@ def _is_logged_in(request: Request) -> bool:
 
 
 async def require_auth(request: Request):
-    """REST 接口依赖：未登录返回 401；已登录把用户名写入 request.state.user。"""
+    """REST 接口依赖：未登录返回 401；已登录把用户名/角色写入 request.state。"""
     if not authmod.enabled():
         request.state.user = ""
+        request.state.role = "admin"
         return None
     user = authmod.verify_session(request.cookies.get(authmod.COOKIE_NAME))
     if user is None:
         raise _Unauthorized()
     request.state.user = user
+    request.state.role = users_db.get_role(user) or "user"
 
 
 def _current_user(request: Request) -> str:
@@ -140,8 +82,43 @@ def _current_user(request: Request) -> str:
     return getattr(request.state, "user", "") or ""
 
 
+def _current_role(request: Request) -> str:
+    """取当前用户角色：admin | user；认证关闭时视为 admin。"""
+    if not authmod.enabled():
+        return "admin"
+    role = getattr(request.state, "role", "")
+    if not role:
+        role = users_db.get_role(_current_user(request)) or "user"
+    return role
+
+
 class _Unauthorized(Exception):
     """由异常处理器转为 401 JSON 响应。"""
+
+
+class _Forbidden(Exception):
+    """权限不足，由异常处理器转为 403 JSON 响应。"""
+
+
+async def require_admin(request: Request):
+    """管理员专属接口依赖：非 admin 返回 403。"""
+    await require_auth(request)
+    if _current_role(request) != "admin":
+        raise _Forbidden()
+
+
+def _provider_public(p: dict) -> dict:
+    """脱敏视图：不回传完整 api_key。"""
+    key = str(p.get("api_key") or "")
+    return {
+        "name": p.get("name"),
+        "scope": p.get("scope", "system"),
+        "owner": p.get("owner", ""),
+        "base_url": p.get("base_url", ""),
+        "has_key": bool(key),
+        "key_hint": f"…{key[-4:]}" if key else "",
+        "models": list(p.get("models") or []),
+    }
 
 
 class RunHandle:
@@ -343,6 +320,15 @@ async def _unauthorized_handler(request: Request, exc: _Unauthorized):
     )
 
 
+@app.exception_handler(_Forbidden)
+async def _forbidden_handler(request: Request, exc: _Forbidden):
+    """权限不足时统一返回 403 JSON。"""
+    return JSONResponse(
+        {"ok": False, "error": "权限不足，仅管理员可操作", "code": "forbidden"},
+        status_code=403,
+    )
+
+
 # ===================== 登录认证 =====================
 @app.get("/login", response_class=HTMLResponse)
 def login_page():
@@ -369,15 +355,16 @@ async def api_login(request: Request):
             {"ok": False, "error": f"尝试过于频繁，请 {remain} 秒后再试"}, status_code=429
         )
 
-    if not authmod.check_credentials(username, password):
+    info = authmod.check_credentials(username, password)
+    if info is None:
         authmod.record_fail(ip)
         # 统一提示，不泄露是用户名还是密码错误
         return JSONResponse({"ok": False, "error": "用户名或密码错误"}, status_code=401)
 
     authmod.clear_fails(ip)
     ttl = authmod.SESSION_TTL if remember else authmod.SESSION_TTL_SHORT
-    token = authmod.make_session(username, ttl)
-    resp = JSONResponse({"ok": True, "username": username})
+    token = authmod.make_session(info["username"], ttl)
+    resp = JSONResponse({"ok": True, "username": info["username"], "role": info["role"]})
     resp.set_cookie(
         authmod.COOKIE_NAME, token,
         max_age=ttl, httponly=True,
@@ -402,7 +389,49 @@ async def api_logout():
 @app.get("/api/auth/check")
 async def api_auth_check(request: Request):
     user = authmod.verify_session(request.cookies.get(authmod.COOKIE_NAME))
-    return {"authenticated": user is not None, "username": user, "enabled": authmod.enabled()}
+    return {
+        "authenticated": user is not None,
+        "username": user,
+        "enabled": authmod.enabled(),
+        "role": (users_db.get_role(user) or "user") if user else "",
+    }
+
+
+# ===================== 用户管理（admin 专属，#69 表结构） =====================
+@app.get("/api/users", dependencies=[Depends(require_admin)])
+def api_users_list():
+    """用户列表（admin 专属）：不回传密码字段。"""
+    return [
+        {"username": u["username"], "role": u["role"], "created_at": u["created_at"]}
+        for u in users_db.list_users()
+    ]
+
+
+@app.post("/api/users", dependencies=[Depends(require_admin)])
+async def api_users_create(body: dict):
+    """创建用户：username 唯一（≤32 字符，字母数字下划线），role 可选 admin/user。"""
+    username = (body.get("username") or "").strip()
+    password = body.get("password") or ""
+    role = (body.get("role") or "user").strip()
+    if not username or not password:
+        return {"ok": False, "error": "用户名与密码不能为空"}
+    if len(username) > 32 or any(not (c.isalnum() or c == "_") for c in username):
+        return {"ok": False, "error": "用户名仅限字母/数字/下划线，≤32 字符"}
+    if len(password) < 4:
+        return {"ok": False, "error": "密码至少 4 位"}
+    info = users_db.create_user(username, password, role)
+    if info is None:
+        return {"ok": False, "error": f"用户 {username} 已存在"}
+    return {"ok": True, "user": info}
+
+
+@app.delete("/api/users/{username}", dependencies=[Depends(require_admin)])
+def api_users_delete(request: Request, username: str):
+    """删除用户；不可删除自己，防止误删最后一个管理员。"""
+    if username == _current_user(request):
+        return {"ok": False, "error": "不能删除当前登录的账号"}
+    ok = users_db.delete_user(username)
+    return {"ok": ok, "error": "" if ok else "用户不存在"}
 
 
 @app.get("/")
@@ -588,18 +617,25 @@ def api_lib_delete(iid: str):
 
 # ===================== 工作台：运行时信息 =====================
 @app.get("/api/runtime", dependencies=[Depends(require_auth)])
-def api_runtime():
-    """顶部工具栏所需：当前模型、可用模型列表、模型提供商、技能统计等。"""
+def api_runtime(request: Request):
+    """顶部工具栏所需：当前模型、可用模型列表、模型提供商、技能统计等。
+
+    models/providers 按用户分级：system 全员可见 + 本人 user 私有。
+    """
+    user = _current_user(request)
+    role = _current_role(request)
     skills = registry.list()
     return {
         "model": agent_manager.model_name if agent_manager else config.MODEL,
         "base_url": agent_manager.base_url if agent_manager else config.OPENAI_BASE_URL,
-        "models": _load_models(),
-        "providers": [_provider_public(p) for p in _load_providers()],
+        "role": role,
+        "models": runtime.list_models(user),
+        "models_scoped": runtime.list_default_models(user),
+        "providers": [_provider_public(p) for p in runtime.list_providers(user)],
         "temperature": config.TEMPERATURE,
         "skills_total": len(skills),
         "skills_enabled": sum(1 for s in skills if s.get("enabled")),
-        "conv_count": len(store.list()),
+        "conv_count": len(store.list(owner=user or None, admin=role == "admin")),
         "project_count": len(workbench.list_projects()),
         "automation_count": len(workbench.list_automations()),
         "library_count": len(workbench.list_library()),
@@ -607,13 +643,14 @@ def api_runtime():
 
 
 @app.post("/api/runtime/model", dependencies=[Depends(require_auth)])
-async def api_set_model(body: dict):
+async def api_set_model(request: Request, body: dict):
     """切换当前使用的模型（仅影响之后新建的对话轮次）；跨提供商模型联动 base_url/api_key。"""
     name = (body.get("model") or "").strip()
     if not name:
         return {"ok": False, "error": "模型名不能为空"}
-    base_url, api_key = _resolve_provider(name)
-    if base_url is None and api_key is None and name not in _load_models():
+    user = _current_user(request)
+    base_url, api_key = runtime.resolve(name, user)
+    if base_url is None and api_key is None and not runtime.model_exists(name, user):
         return {"ok": False, "error": f"模型 {name} 不在可用列表中，请先添加"}
     if agent_manager is None:
         return {"ok": False, "error": "Agent 尚未初始化"}
@@ -622,49 +659,69 @@ async def api_set_model(body: dict):
 
 
 @app.post("/api/runtime/models", dependencies=[Depends(require_auth)])
-async def api_add_model(body: dict):
-    """向可用模型表添加一个模型名；body.provider 指定归属的自定义提供商（缺省为默认组）。"""
+async def api_add_model(request: Request, body: dict):
+    """添加模型。body.scope: system（admin 专属）/ user（私有，默认）；
+    body.provider 指定归属提供商（缺省为默认组，走 .env 凭据）。"""
     name = (body.get("name") or body.get("model") or "").strip()
     if not name:
         return {"ok": False, "error": "模型名不能为空"}
     if len(name) > 120 or any(ch in name for ch in " \t\r\n"):
         return {"ok": False, "error": "模型名不合法（不得含空白，≤120 字符）"}
+    role = _current_role(request)
+    scope = (body.get("scope") or "user").strip()
+    if scope not in ("system", "user"):
+        scope = "user"
+    if scope == "system" and role != "admin":
+        return {"ok": False, "error": "系统模型仅管理员可管理"}
+    owner = "" if scope == "system" else _current_user(request)
     provider = (body.get("provider") or "").strip()
-    if not provider:
-        models = _load_models()
-        if name in models:
+    if provider:
+        p = runtime.get_provider(provider, scope, owner)
+        if p is None:
+            return {"ok": False, "error": f"提供商 {provider} 不存在或无权限"}
+        if not runtime.add_model(name, provider, scope, owner):
+            return {"ok": False, "error": "该提供商下已有同名模型"}
+    else:
+        if runtime.model_exists(name, owner):
             return {"ok": False, "error": "模型已存在"}
-        models.append(name)
-        _save_models(models)
-        return {"ok": True, "models": models}
-    ps = _load_providers()
-    p = next((x for x in ps if x.get("name") == provider), None)
-    if p is None:
-        return {"ok": False, "error": f"提供商 {provider} 不存在"}
-    p.setdefault("models", [])
-    if name in p["models"]:
-        return {"ok": False, "error": "该提供商下已有同名模型"}
-    p["models"].append(name)
-    _save_providers(ps)
-    return {"ok": True, "providers": [_provider_public(x) for x in ps]}
+        if not runtime.add_model(name, "", scope, owner):
+            return {"ok": False, "error": "模型已存在"}
+    return {
+        "ok": True,
+        "models": runtime.list_models(owner),
+        "models_scoped": runtime.list_default_models(owner),
+        "providers": [_provider_public(x) for x in runtime.list_providers(owner)],
+    }
 
 
 @app.delete("/api/runtime/models/{name}", dependencies=[Depends(require_auth)])
-def api_del_model(name: str):
-    models = _load_models()
-    if name not in models:
-        return {"ok": False, "error": "模型不存在"}
-    models.remove(name)
-    _save_models(models)
-    # 删除的是当前模型时回退到表中第一个
-    if agent_manager and agent_manager.model_name == name and models:
-        agent_manager.set_model(models[0])
-    return {"ok": True, "models": models, "model": agent_manager.model_name if agent_manager else None}
+def api_del_model(request: Request, name: str, scope: str = "user", provider: str = ""):
+    """删除模型。scope=system 需 admin；普通用户只能删自己的 user 模型。"""
+    if scope not in ("system", "user"):
+        scope = "user"
+    if scope == "system" and _current_role(request) != "admin":
+        return {"ok": False, "error": "系统模型仅管理员可管理"}
+    owner = "" if scope == "system" else _current_user(request)
+    if not runtime.del_model(name, provider, scope, owner):
+        return {"ok": False, "error": "模型不存在或无权限"}
+    # 删除的是当前模型时回退到可见列表第一个
+    if agent_manager and agent_manager.model_name == name:
+        remain = runtime.list_models(owner)
+        if remain:
+            agent_manager.set_model(remain[0])
+    return {
+        "ok": True,
+        "models": runtime.list_models(owner),
+        "models_scoped": runtime.list_default_models(owner),
+        "providers": [_provider_public(x) for x in runtime.list_providers(owner)],
+        "model": agent_manager.model_name if agent_manager else None,
+    }
 
 
 @app.post("/api/runtime/providers", dependencies=[Depends(require_auth)])
-async def api_add_provider(body: dict):
-    """添加模型提供商（OpenAI 兼容接口）：name 唯一、base_url 必须是 http(s) 地址。"""
+async def api_add_provider(request: Request, body: dict):
+    """添加模型提供商（OpenAI 兼容接口）：name 唯一、base_url 必须是 http(s) 地址。
+    scope: system（admin 专属）/ user（私有，默认）。"""
     name = (body.get("name") or "").strip()
     base_url = (body.get("base_url") or "").strip()
     api_key = (body.get("api_key") or "").strip()
@@ -674,63 +731,83 @@ async def api_add_provider(body: dict):
         return {"ok": False, "error": "default 为内置默认提供商，请换一个名称"}
     if not base_url.lower().startswith(("http://", "https://")):
         return {"ok": False, "error": "接口地址需以 http:// 或 https:// 开头"}
-    ps = _load_providers()
-    if any(p.get("name") == name for p in ps):
+    role = _current_role(request)
+    scope = (body.get("scope") or "user").strip()
+    if scope not in ("system", "user"):
+        scope = "user"
+    if scope == "system" and role != "admin":
+        return {"ok": False, "error": "系统提供商仅管理员可管理"}
+    owner = "" if scope == "system" else _current_user(request)
+    if not runtime.add_provider(name, base_url, api_key, scope, owner):
         return {"ok": False, "error": f"提供商 {name} 已存在"}
-    ps.append({"name": name, "base_url": base_url, "api_key": api_key, "models": []})
-    _save_providers(ps)
-    return {"ok": True, "providers": [_provider_public(p) for p in ps]}
+    return {
+        "ok": True,
+        "providers": [_provider_public(x) for x in runtime.list_providers(owner)],
+    }
 
 
 @app.delete("/api/runtime/providers/{name}", dependencies=[Depends(require_auth)])
-def api_del_provider(name: str):
-    ps = _load_providers()
-    p = next((x for x in ps if x.get("name") == name), None)
-    if p is None:
-        return {"ok": False, "error": "提供商不存在"}
-    ps.remove(p)
-    _save_providers(ps)
-    # 正用着该提供商下的模型时，回退到默认表第一个
-    if agent_manager and name not in {x["name"] for x in ps}:
+def api_del_provider(request: Request, name: str, scope: str = "user"):
+    """删除提供商（级联删除其下模型）。scope=system 需 admin。"""
+    if scope not in ("system", "user"):
+        scope = "user"
+    if scope == "system" and _current_role(request) != "admin":
+        return {"ok": False, "error": "系统提供商仅管理员可管理"}
+    owner = "" if scope == "system" else _current_user(request)
+    if not runtime.del_provider(name, scope, owner):
+        return {"ok": False, "error": "提供商不存在或无权限"}
+    # 正用着该提供商下的模型时，回退到可见列表第一个
+    if agent_manager:
         cur = agent_manager.model_name
-        if cur in (p.get("models") or []):
-            fallback = _load_models()
-            if fallback:
-                agent_manager.set_model(fallback[0])
-    return {"ok": True, "providers": [_provider_public(x) for x in ps],
-            "model": agent_manager.model_name if agent_manager else None}
+        if cur and not runtime.model_exists(cur, owner):
+            remain = runtime.list_models(owner)
+            if remain:
+                agent_manager.set_model(remain[0])
+    return {
+        "ok": True,
+        "providers": [_provider_public(x) for x in runtime.list_providers(owner)],
+        "model": agent_manager.model_name if agent_manager else None,
+    }
 
 
 @app.delete("/api/runtime/providers/{name}/models/{model}", dependencies=[Depends(require_auth)])
-def api_del_provider_model(name: str, model: str):
-    ps = _load_providers()
-    p = next((x for x in ps if x.get("name") == name), None)
-    if p is None:
-        return {"ok": False, "error": "提供商不存在"}
-    models = p.get("models") or []
-    if model not in models:
-        return {"ok": False, "error": "该提供商下没有此模型"}
-    models.remove(model)
-    p["models"] = models
-    _save_providers(ps)
-    if agent_manager and agent_manager.model_name == model and _load_models():
-        agent_manager.set_model(_load_models()[0])
-    return {"ok": True, "providers": [_provider_public(x) for x in ps],
-            "model": agent_manager.model_name if agent_manager else None}
+def api_del_provider_model(request: Request, name: str, model: str, scope: str = "user"):
+    if scope not in ("system", "user"):
+        scope = "user"
+    if scope == "system" and _current_role(request) != "admin":
+        return {"ok": False, "error": "系统提供商仅管理员可管理"}
+    owner = "" if scope == "system" else _current_user(request)
+    if not runtime.del_provider_model(name, model, scope, owner):
+        return {"ok": False, "error": "该提供商下没有此模型或无权限"}
+    if agent_manager:
+        cur = agent_manager.model_name
+        if cur == model and not runtime.model_exists(cur, owner):
+            remain = runtime.list_models(owner)
+            if remain:
+                agent_manager.set_model(remain[0])
+    return {
+        "ok": True,
+        "providers": [_provider_public(x) for x in runtime.list_providers(owner)],
+        "model": agent_manager.model_name if agent_manager else None,
+    }
 
 
 # ===================== 会话管理（会话归属当前用户） =====================
 def _conv_owned(meta: dict | None, user: str) -> bool:
-    """会话可见性：owner 为空的旧会话对所有人可见；否则仅归属用户可见。"""
+    """会话可见性：admin 全见；owner 为空的旧会话对所有人可见；否则仅归属用户可见。"""
     if not meta:
         return False
+    if authmod.enabled() and user and users_db.get_role(user) == "admin":
+        return True
     owner = meta.get("owner") or ""
     return not owner or not user or owner == user
 
 
 @app.get("/api/conversations", dependencies=[Depends(require_auth)])
 def api_conv_list(request: Request):
-    items = store.list(owner=_current_user(request) or None)
+    user = _current_user(request)
+    admin = _current_role(request) == "admin"
+    items = store.list() if admin else store.list(owner=user or None)
     for c in items:
         r = RUNS.get(c["id"])
         c["running"] = bool(r and not r.done)  # 会话列表「运行中」徽标
@@ -770,7 +847,8 @@ async def api_conv_rename(request: Request, cid: str, body: dict):
 
 
 # ===================== 会话工作目录文件浏览 =====================
-_TEXT_LIMIT = 200 * 1024  # 单文件预览上限 200KB
+# 预览不再限制 200KB（取消 _TEXT_LIMIT）；仅保留防 OOM 软上限
+_FILE_HARD_LIMIT = 32 * 1024 * 1024  # 超过 32MB 不读入内存，提示下载
 
 
 def _looks_text(p: str) -> bool:
@@ -790,10 +868,10 @@ def _looks_text(p: str) -> bool:
 def _read_file_view(full: str, path: str) -> dict:
     size = os.path.getsize(full)
     name = os.path.basename(full)
-    if size > _TEXT_LIMIT:
+    if size > _FILE_HARD_LIMIT:
         return {"ok": True, "type": "file", "path": path, "name": name,
                 "size": size, "content": "", "truncated": True, "binary": False,
-                "note": f"文件过大（{size} 字节，超过 {_TEXT_LIMIT} 预览上限），请使用下载查看。"}
+                "note": f"文件过大（{size // 1024 // 1024} MB），请使用下载查看。"}
     if _looks_text(full):
         with open(full, "r", encoding="utf-8", errors="replace") as f:
             content = f.read()

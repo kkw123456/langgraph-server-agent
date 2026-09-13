@@ -139,17 +139,28 @@ export interface LibraryItem {
 }
 
 // 运行时信息：可选模型与当前模型，以及各域统计（用于设置页展示）
-/** 模型提供商（OpenAI 兼容），api_key 服务端只回传脱敏提示 */
+/** 模型提供商（OpenAI 兼容），api_key 服务端只回传脱敏提示；
+ *  scope: system 全员可见（admin 管理）/ user 用户私有 */
 export interface RuntimeProvider {
   name: string
+  scope?: 'system' | 'user'
+  owner?: string
   base_url: string
   has_key?: boolean
   key_hint?: string
   models: string[]
 }
 
+/** 用户（admin 管理页用，不含密码字段） */
+export interface UserInfo {
+  username: string
+  role: string
+  created_at: number
+}
+
 export interface RuntimeInfo {
   model: string
+  role?: string
   base_url?: string
   models: string[]
   providers?: RuntimeProvider[]

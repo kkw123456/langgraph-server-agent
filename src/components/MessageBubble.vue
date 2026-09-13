@@ -4,12 +4,13 @@ import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { NAvatar } from 'naive-ui'
 import {
-  Bot, BrainCircuit, Braces, ChevronDown, Code2, Eye, File as FileIco, FileOutput, FilePlus2, FileText, FolderClosed,
+  Bot, BrainCircuit, Braces, ChevronDown, Code2, Eye, FileOutput, FilePlus2, FileText, FolderClosed,
   Globe, Loader2, Table2, Terminal, UserRound, Wrench,
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
 import type { Message, ToolCall } from '../types'
 import { toolLabel } from '../utils/toolLabels'
+import { fileIcon, extOf } from '../utils/fileicons'
 import { state } from '../store'
 import { api } from '../api'
 
@@ -214,6 +215,12 @@ function fmtAttachSize(n: number): string {
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
   return `${(n / 1024 / 1024).toFixed(1)} MB`
 }
+
+/** 附件类型标签：无扩展名显示「文件」 */
+function attachType(name: string): string {
+  const ext = extOf(name)
+  return ext ? ext.toUpperCase() : '文件'
+}
 </script>
 
 <template>
@@ -229,7 +236,7 @@ function fmtAttachSize(n: number): string {
     <div class="bubble">
       <template v-if="msg.role === 'user'">
         <span v-if="userText" class="user-text">{{ userText }}</span>
-        <!-- 附件卡片：点击在右侧面板打开工作目录中的原文件 -->
+        <!-- 附件卡片（#64）：完整文件信息（图标/名称/大小/类型标签），宽度不超气泡右界 -->
         <div v-if="msg.attachments?.length" class="msg-attach">
           <span
             v-for="a in msg.attachments"
@@ -238,12 +245,17 @@ function fmtAttachSize(n: number): string {
             :title="a.path"
             @click="emit('open-file', a.path)"
           >
-            <FileIco :size="14" class="ma-ico" />
+            <span class="ma-ico-box" :style="{ background: fileIcon(a.name).color + '1a', color: fileIcon(a.name).color }">
+              <component :is="fileIcon(a.name).icon" :size="16" />
+            </span>
             <span class="ma-main">
               <span class="ma-name">{{ a.name }}</span>
-              <span class="ma-meta">{{ fmtAttachSize(a.size) }} · 点击查看</span>
+              <span class="ma-meta">
+                <span class="ma-type" :style="{ color: fileIcon(a.name).color, borderColor: fileIcon(a.name).color + '55' }">{{ attachType(a.name) }}</span>
+                <span>{{ fmtAttachSize(a.size) }}</span>
+                <span class="ma-view"><Eye :size="11" /> 点击查看</span>
+              </span>
             </span>
-            <Eye :size="13" class="ma-eye" />
           </span>
         </div>
       </template>

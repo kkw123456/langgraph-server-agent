@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { ref, watch, nextTick, computed } from 'vue'
-import { NInput, NButton, NSelect, NRadioGroup, NRadioButton } from 'naive-ui'
+import { NInput, NButton, NSelect, NRadioGroup, NRadioButton, NSkeleton } from 'naive-ui'
 import {
   Send, Sparkles, Loader2, ListChecks, Code2, FileText,
-  Table2, Search, Bug, Wand2, Palette, Image, Braces, Globe, Square, File as FileIco, X, ShieldCheck, Paperclip,
+  Table2, Search, Bug, Wand2, Palette, Image, Braces, Globe, Square, X, ShieldCheck, Paperclip,
 } from 'lucide-vue-next'
 import { state, stopChat, setMode, sendText } from '../store'
 import { wb, setModel } from '../workbench'
 import MessageBubble from './MessageBubble.vue'
+import { fileIcon } from '../utils/fileicons'
 
 // 附件卡片点击 → 请求 Home 打开右侧面板预览该文件
 const emit = defineEmits<{ 'open-file': [path: string] }>()
@@ -25,7 +26,9 @@ const MAX_SIZE = 15 * 1024 * 1024
 // 会话进行中（等待回复 / 流式输出 / 工具执行）：发送键切换为停止键
 const busy = computed(() => state.waiting || state.running || !!state.live)
 const streaming = computed(() => !!state.live)
-const empty = computed(() => !state.messages.length && !state.live && !state.waiting)
+const empty = computed(() => !state.messages.length && !state.live && !state.waiting && !state.loadingMsgs)
+// 消息区骨架屏：选中会话后拉取历史期间显示（#60）
+const showSkeleton = computed(() => state.loadingMsgs && !!state.current)
 // 发送过程 loading：上传附件 + 发出消息期间（busy 接管后由停止键替换）
 const sending = ref(false)
 
@@ -153,8 +156,19 @@ watch(() => state.current, () => { draft.value = '' })
 <template>
   <div class="chat-view">
     <section class="messages" ref="box">
+      <!-- 消息骨架屏：选中会话后加载历史占位（#60） -->
+      <div v-if="showSkeleton" class="msg-skeleton" aria-label="加载中">
+        <div v-for="i in 5" :key="i" class="skel-row" :class="{ mine: i % 2 === 0 }">
+          <NSkeleton circle size="small" class="skel-avatar" />
+          <div class="skel-bubbles">
+            <NSkeleton :width="i % 2 === 0 ? 240 : 330" height="13px" :sharp="false" />
+            <NSkeleton :width="i % 2 === 0 ? 170 : 220" height="13px" :sharp="false" />
+          </div>
+        </div>
+      </div>
+
       <!-- 空态：品牌 + 场景 tab + 快捷入口卡片 -->
-      <div v-if="empty" class="hero">
+      <div v-else-if="empty" class="hero">
         <div class="hero-brand">
           <div class="hero-logo"><Sparkles :size="30" /></div>
           <h2>今天想让我做点什么？</h2>
@@ -213,10 +227,10 @@ watch(() => state.current, () => { draft.value = '' })
       @drop.prevent="onDrop"
     >
       <div class="composer-inner">
-        <!-- 待上传附件 chips -->
+        <!-- 待上传附件 chips（#66：扩展名彩色图标） -->
         <div v-if="pendingFiles.length" class="attach-row">
           <span v-for="(f, i) in pendingFiles" :key="f.name + f.size" class="attach-chip">
-            <FileIco :size="13" class="attach-ico" />
+            <component :is="fileIcon(f.name).icon" :size="13" class="attach-ico" :style="{ color: fileIcon(f.name).color }" />
             <span class="attach-name">{{ f.name }}</span>
             <span class="attach-size muted">{{ fmtSize(f.size) }}</span>
             <X :size="13" class="attach-x" title="移除" @click="removeFile(i)" />

@@ -18,6 +18,7 @@ import secrets
 import threading
 
 import config
+import users_store as _us_mod
 
 # Cookie 名与令牌有效期
 COOKIE_NAME = "lg_session"
@@ -31,6 +32,16 @@ FAIL_WINDOW = 900
 
 _lock = threading.Lock()
 _fails: dict[str, list[float]] = {}
+
+# 用户表（懒加载：首次校验时才建表/播种，避免 import 副作用）
+_store: _us_mod.UserStore | None = None
+
+
+def users_db() -> _us_mod.UserStore:
+    global _store
+    if _store is None:
+        _store = _us_mod.UserStore(config.DATA_DIR)
+    return _store
 
 
 def enabled() -> bool:
@@ -80,15 +91,12 @@ def verify_session(token: str | None) -> str | None:
 
 
 # ---------------- 凭据校验 ----------------
-def check_credentials(username: str, password: str) -> bool:
-    """常量时间比对用户名与密码。"""
-    u_ok = hmac.compare_digest(
-        (username or "").encode("utf-8"), (config.AUTH_USERNAME or "").encode("utf-8")
-    )
-    p_ok = hmac.compare_digest(
-        (password or "").encode("utf-8"), (config.AUTH_PASSWORD or "").encode("utf-8")
-    )
-    return u_ok and p_ok
+def check_credentials(username: str, password: str) -> dict | None:
+    """查 users 表校验（admin 已由 UserStore 用 .env 配置播种）。
+
+    返回 {username, role}；校验失败返回 None。
+    """
+    return users_db().verify_credentials(username or "", password or "")
 
 
 # ---------------- 登录限流 ----------------

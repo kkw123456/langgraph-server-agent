@@ -11,6 +11,7 @@ interface AuthState {
   ready: boolean           // 是否已完成首次登录态探测
   authenticated: boolean   // 当前是否已登录
   username: string | null  // 登录用户名
+  role: string             // 角色：admin | user
   enabled: boolean         // 服务端是否启用了登录校验
 }
 
@@ -18,6 +19,7 @@ export const authState = reactive<AuthState>({
   ready: false,
   authenticated: false,
   username: null,
+  role: 'user',
   enabled: true,
 })
 
@@ -29,9 +31,13 @@ export async function checkAuth(force = false): Promise<AuthState> {
     const d = await r.json()
     authState.authenticated = !!d.authenticated
     authState.username = d.username ?? null
-    // enabled=false 表示服务端未启用鉴权，此时一律视为已登录
+    authState.role = d.role || 'user'
+    // enabled=false 表示服务端未启用鉴权，此时一律视为已登录（管理员语义）
     authState.enabled = d.enabled !== false
-    if (!authState.enabled) authState.authenticated = true
+    if (!authState.enabled) {
+      authState.authenticated = true
+      authState.role = 'admin'
+    }
   } catch (e) {
     // 网络异常时保守处理：不认定为已登录，交由路由守卫跳登录页
     authState.authenticated = false
@@ -58,13 +64,14 @@ export async function login(
       credentials: 'same-origin',
       body: JSON.stringify({ username, password, remember }),
     })
-    let d: { ok?: boolean; error?: string; username?: string } = {}
+    let d: { ok?: boolean; error?: string; username?: string; role?: string } = {}
     try { d = await r.json() } catch (e) { /* 非 JSON 响应 */ }
 
     if (r.ok && d.ok) {
       authState.ready = true
       authState.authenticated = true
       authState.username = d.username ?? username
+      authState.role = d.role || 'user'
       return { ok: true }
     }
     return {
@@ -85,4 +92,5 @@ export async function logout(): Promise<void> {
   } catch (e) { /* 忽略：无论请求是否成功，本地状态都要清掉 */ }
   authState.authenticated = false
   authState.username = null
+  authState.role = 'user'
 }

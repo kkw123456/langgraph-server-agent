@@ -16,6 +16,8 @@ interface AppState {
   searchKw: string          // 顶部工具栏的任务搜索关键字
   waiting: boolean          // 消息已发出但模型尚未开始回复（显示 loading）
   running: boolean          // 当前会话是否有正在进行的对话轮次
+  loadingMsgs: boolean      // 选中会话后消息区骨架屏（#60）
+  convsLoading: boolean     // 会话列表首次加载骨架屏（#61）
   filesTick: number         // 会话工作目录变化信号：创建文件类工具结束 / 会话完成时 +1，文件面板据此刷新
   sidebarOpen: boolean      // 移动端会话栏抽屉开关（由 Shell 渲染，聊天区按钮触发）
   rightOpen: boolean        // 右侧结果面板显隐（PC 消息头部 / 移动端 header 的面板开关）
@@ -36,6 +38,8 @@ export const state = reactive<AppState>({
   searchKw: '',
   waiting: false,
   running: false,
+  loadingMsgs: false,
+  convsLoading: false,
   filesTick: 0,
   sidebarOpen: false,
   rightOpen: false,
@@ -216,9 +220,16 @@ function applyEvent(msg: WsEvent): void {
 
 // ===================== 会话 =====================
 export async function loadConvs(): Promise<void> {
-  state.convs = await api.get<Conversation[]>('/api/conversations')
-  const cur = state.convs.find((c) => c.id === state.current)
-  state.running = !!cur?.running
+  // 仅首次拉取时显示列表骨架（轮询/事件后刷新不闪烁）
+  const first = state.convs.length === 0
+  if (first) state.convsLoading = true
+  try {
+    state.convs = await api.get<Conversation[]>('/api/conversations')
+    const cur = state.convs.find((c) => c.id === state.current)
+    state.running = !!cur?.running
+  } finally {
+    if (first) state.convsLoading = false
+  }
 }
 
 /** 按顶部工具栏的搜索关键字过滤后的会话列表。 */
@@ -244,10 +255,15 @@ export async function selectConv(id: string): Promise<void> {
   state.pendingTool = null
   state.waiting = false
   state.running = false
+  state.loadingMsgs = true // 消息区骨架屏：加载完成前占位（#60）
   localStorage.setItem('lg_last_conv', id) // 刷新后恢复到最后会话
-  const d = await api.get<{ meta?: Conversation; messages?: Message[] }>(`/api/conversations/${id}`)
-  state.convTitle = d.meta ? d.meta.title : '未选择会话'
-  state.messages = d.messages ?? []
+  try {
+    const d = await api.get<{ meta?: Conversation; messages?: Message[] }>(`/api/conversations/${id}`)
+    state.convTitle = d.meta ? d.meta.title : '未选择会话'
+    state.messages = d.messages ?? []
+  } finally {
+    state.loadingMsgs = false
+  }
   connectWs(id)
   await loadConvs()
 }
