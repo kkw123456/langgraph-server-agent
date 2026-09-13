@@ -38,7 +38,7 @@ export const state = reactive<AppState>({
   running: false,
   filesTick: 0,
   sidebarOpen: false,
-  rightOpen: true,
+  rightOpen: false,
 })
 
 let ws: WebSocket | null = null
@@ -61,7 +61,16 @@ function connectWs(id: string): void {
     // 后端会立即推送 resume 事件包，前端按原序重放即可续看流式输出
     ws!.send(JSON.stringify({ type: 'set_mode', mode: state.mode }))
   }
-  ws.onclose = () => { state.status = '○ 已断开' }
+  ws.onclose = () => {
+    state.status = '○ 已断开'
+    // 异常断线兜底：等待回复阶段连接断开且无流式内容时，补提示并复位，避免界面永久卡在「回复中」
+    if (state.waiting && !state.live) {
+      state.messages.push({ role: 'assistant', content: '（连接中断，请重新发送）' })
+      state.waiting = false
+      state.running = false
+      setConvRunning(state.current, false)
+    }
+  }
   ws.onmessage = (ev: MessageEvent) => handleEvent(JSON.parse(ev.data) as WsEvent)
 }
 
@@ -165,7 +174,7 @@ function applyEvent(msg: WsEvent): void {
         if (msg.stopped && (c || (state.live.tool_calls ?? []).length)) {
           c = (c || '') + (c ? '\n\n' : '') + '（已手动停止）'
         }
-        // 内容与工具调用全为空时不落空消息（如刚等待就停止）
+        // 内容与工具调用全为空：后端不落库，前端补一条提示气泡，避免「发送后 AI 端毫无反应」
         if (c || (state.live.tool_calls ?? []).length) {
           state.messages.push({
             role: 'assistant',
@@ -173,6 +182,8 @@ function applyEvent(msg: WsEvent): void {
             tool_calls: (state.live.tool_calls ?? []).map((t) => ({ ...t })),
             reasoning: state.live.reasoning,
           })
+        } else {
+          state.messages.push({ role: 'assistant', content: '（本轮模型未返回内容，可能是服务波动，请重试）' })
         }
         state.live = null
       }
@@ -290,6 +301,10 @@ export async function renameConv(id: string, title: string): Promise<void> {
 export async function sendText(text: string, files?: File[]): Promise<void> {
   const t = (text || '').trim()
   if (!t && !(files && files.length)) return
+  // 乐观占位：从发送这一刻就显示「回复中」，覆盖会话创建/附件上传/握手/模型首 token 的全部空窗
+  state.waiting = true
+  state.running = true
+  setConvRunning(state.current, true)
   if (!state.current) {
     const c = await api.post<Conversation>('/api/conversations', { title: (t || '文件会话').slice(0, 30) })
     state.current = c.id
@@ -324,18 +339,22 @@ export async function sendText(text: string, files?: File[]): Promise<void> {
       body = (body ? body + '\n\n' : '') + `[附件已上传至工作目录：${list}，可直接读取]`
     }
   }
-  if (!body.trim() && !attachments.length) return
+  if (!body.trim() && !attachments.length) {
+    // 无正文且附件全部失败：没有消息可发，复位乐观占位
+    state.waiting = false
+    state.running = false
+    setConvRunning(state.current, false)
+    return
+  }
   state.messages.push({ role: 'user', content: body, attachments: attachments.length ? attachments : undefined })
   if (ws && ws.readyState === 1) {
-    state.waiting = true // 等待模型开始回复，聊天区显示 loading
-    state.running = true
-    setConvRunning(state.current, true) // 乐观标记：侧栏会话项立即转圈
     ws.send(JSON.stringify({ type: 'message', content: body, attachments }))
   } else {
     await api.post(`/api/conversations/${state.current}/messages`, { content: body, attachments })
     const d = await api.get<{ messages?: Message[] }>(`/api/conversations/${state.current}`)
     state.messages = d.messages ?? []
     state.waiting = false
+    state.running = false
     state.filesTick++ // REST 兜底路径无事件流，直接标记文件树刷新
     loadConvs()
   }

@@ -152,36 +152,37 @@ function pick(obj: Record<string, unknown> | null, ...keys: string[]): string {
 function toolSummary(tc: ToolCall): { title: string; path?: string } {
   const obj = parseInput(tc.input)
   const path = pick(obj, 'path', 'file', 'file_path', 'dir', 'directory')
+  // 仅当能定位到具体路径时标题才附带详细内容，其余只显示动作名（详情在展开的 JSON 里）
   switch (tc.name) {
     case 'run_python':
-      return { title: `执行脚本 ${truncate(pick(obj, 'code') || tc.input, 66)}` }
+      return { title: '执行脚本' }
     case 'run_command':
     case 'run_shell':
     case 'bash':
-      return { title: `运行命令 ${truncate(pick(obj, 'command', 'cmd') || tc.input, 66)}` }
+      return { title: '运行命令' }
     case 'write_file':
-      return { title: `添加 ${path || '文件'}`, path: path || undefined }
+      return { title: path ? `添加 ${path}` : '添加文件', path: path || undefined }
     case 'edit_file':
-      return { title: `修改 ${path || '文件'}`, path: path || undefined }
+      return { title: path ? `修改 ${path}` : '修改文件', path: path || undefined }
     case 'delete_file':
-      return { title: `删除 ${path || '文件'}`, path: path || undefined }
+      return { title: path ? `删除 ${path}` : '删除文件', path: path || undefined }
     case 'make_dir':
-      return { title: `添加目录 ${path || ''}`, path: path || undefined }
+      return { title: path ? `添加目录 ${path}` : '添加目录', path: path || undefined }
     case 'read_file':
-      return { title: `读取 ${path || '文件'}`, path: path || undefined }
+      return { title: path ? `读取 ${path}` : '读取文件', path: path || undefined }
     case 'list_dir':
-      return { title: `浏览目录 ${path || '.'}`, path: path || undefined }
+      return { title: path ? `浏览目录 ${path}` : '浏览目录', path: path || undefined }
     case 'search_files':
-      return { title: `搜索 ${truncate(pick(obj, 'pattern', 'query', 'keyword') || tc.input, 50)}` }
+      return path ? { title: `搜索 ${path}`, path } : { title: '搜索' }
     case 'web_search':
-      return { title: `联网搜索 ${truncate(pick(obj, 'query', 'keyword') || tc.input, 50)}` }
+      return { title: '联网搜索' }
     case 'web_fetch':
     case 'fetch_url':
-      return { title: `抓取网页 ${truncate(pick(obj, 'url') || tc.input, 50)}` }
+      return { title: '抓取网页' }
     case 'calculator':
-      return { title: `计算 ${truncate(pick(obj, 'expression') || tc.input, 50)}` }
+      return { title: '计算' }
     default:
-      return { title: `${toolLabel(tc.name)} ${truncate(tc.input, 50)}`, path: path || undefined }
+      return path ? { title: `${toolLabel(tc.name)} ${path}`, path } : { title: toolLabel(tc.name) }
   }
 }
 
@@ -212,11 +213,6 @@ function fmtAttachSize(n: number): string {
   if (n < 1024) return `${n} B`
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
   return `${(n / 1024 / 1024).toFixed(1)} MB`
-}
-
-function truncate(s: string, n = 110): string {
-  s = String(s || '').replace(/\s+/g, ' ').trim()
-  return s.length > n ? s.slice(0, n) + '…' : s
 }
 </script>
 

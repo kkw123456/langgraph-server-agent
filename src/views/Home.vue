@@ -145,8 +145,9 @@ function refreshActive(): void {
   if (activeTab.value) void openPreviewTab(activeTab.value, { force: true })
 }
 
-/** 消息附件卡片：打开右侧面板预览工作目录文件。 */
+/** 消息附件卡片 / 工具节点路径：打开右侧面板预览工作目录文件（面板关闭时自动唤起）。 */
 function openAttachment(path: string): void {
+  state.rightOpen = true
   void openPreviewTab(path)
 }
 
@@ -463,6 +464,10 @@ onBeforeUnmount(() => {
           </div>
         </template>
         <div class="rp-actions">
+          <!-- 覆盖层模式下头部开关被面板盖住，提供面板内关闭入口 -->
+          <NButton v-if="overlay" quaternary circle size="small" title="关闭面板" @click="state.rightOpen = false">
+            <template #icon><X :size="15" /></template>
+          </NButton>
           <NButton quaternary circle size="small" title="刷新" @click="refreshActive">
             <template #icon><RotateCw :size="15" /></template>
           </NButton>

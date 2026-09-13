@@ -107,7 +107,7 @@ body {
 /* 窄屏覆盖层模式：两列塌缩成单列，右面板变为抽屉/浮层 */
 .app-shell.as-overlay { grid-template-columns: minmax(0, 1fr); }
 .app-shell.as-overlay .right {
-  position: absolute; top: 46px; bottom: 0; right: 0; width: min(92vw, 420px); z-index: 35;
+  position: absolute; top: 0; bottom: 0; right: 0; width: min(92vw, 420px); z-index: 35;
   border-left: 1px solid var(--border); box-shadow: 0 -10px 30px rgba(0,0,0,.14);
 }
 
@@ -300,7 +300,9 @@ body {
 }
 .bubble {
   padding: 10px 14px; border-radius: 16px; line-height: 1.65; font-size: 14px;
-  white-space: pre-wrap; word-break: break-word; max-width: min(720px, 100%); min-width: 0;
+  white-space: pre-wrap; word-break: break-word;
+  /* 两侧各让出头像位（32px 头像 + 10px gap）：AI 与用户气泡共享同一内容带，边界完全对称 */
+  max-width: calc(100% - 84px); min-width: 0;
 }
 .msg.user .bubble {
   background: var(--accent-grad); color: #fff;
@@ -388,18 +390,12 @@ body {
 }
 .tool-node.running .tn-ico { background: rgba(24, 160, 88, .16); }
 .tn-name { font-size: 12.5px; font-weight: 600; flex: 0 0 auto; }
-.tn-state { flex: 0 0 auto; color: var(--accent); }
+.tn-state { flex: 0 0 auto; color: var(--accent); margin-left: auto; } /* 收起/展开 icon 固定在最右 */
 .tn-done { color: var(--ok); }
 
 /* ---- 等待模型回复的 shimmer 占位 ---- */
 .waiting-bubble { display: inline-flex; align-items: center; gap: 10px; }
-.shimmer-text {
-  font-size: 13px; font-weight: 550;
-  background: linear-gradient(90deg, var(--muted) 25%, var(--accent) 50%, var(--muted) 75%);
-  background-size: 200% 100%; -webkit-background-clip: text; background-clip: text;
-  color: transparent; animation: shimmer 1.6s linear infinite;
-}
-@keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+.waiting-text { font-size: 13px; font-weight: 550; color: var(--muted); }
 .dots { display: inline-flex; gap: 4px; align-items: center; }
 .dots i {
   width: 5px; height: 5px; border-radius: 50%; background: var(--accent);
@@ -477,7 +473,7 @@ body {
 .composer-input .n-input__textarea-el { padding: 7px 0 !important; }
 .composer-bar { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .composer-bar .grow { flex: 1; min-width: 0; }
-.composer-model { width: 168px; flex: 0 0 auto; }
+.composer-model { flex: 0 0 auto; } /* 宽度由组件内联样式按模型名自适应 */
 /* 权限模式（模型左侧） */
 .composer-mode { flex: 0 0 auto; }
 .mode-ico { display: inline-flex; align-items: center; margin-right: 4px; }
@@ -792,7 +788,7 @@ body {
   .hero-logo { width: 52px; height: 52px; border-radius: 15px; }
   .composer { padding: 8px 12px 10px; }
   .composer-inner { padding: 8px 8px 6px 12px; border-radius: 16px; }
-  .composer-model { width: 116px; }
+  .composer-model { max-width: 40vw; }
   .composer-aux { display: none; }
   /* 权限模式收成纯图标 */
   .composer-mode .mode-full { display: none; }
@@ -889,6 +885,8 @@ body {
   }
   /* 移动端不展示 AI / 用户头像图标 */
   .msg .avatar, .msg .avatar-holder { display: none; }
+  /* 无头像占位后气泡恢复全宽 */
+  .bubble { max-width: min(720px, 100%); }
 }
 
 /* ---- 聊天输入框：拖拽文件悬停高亮 ---- */

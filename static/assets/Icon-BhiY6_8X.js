@@ -1,0 +1,9 @@
+import{t as e}from"./format-length-CvikEr0l.js";import{Gt as t,On as n,Ot as r,Qn as i,Tn as a,Un as o,Xn as s,Xt as c,_ as l,er as u,kt as d,wn as f}from"./index-C0Q3aJro.js";var p=a(`icon`,`
+ height: 1em;
+ width: 1em;
+ line-height: 1em;
+ text-align: center;
+ display: inline-block;
+ position: relative;
+ fill: currentColor;
+`,[n(`color-transition`,{transition:`color .3s var(--n-bezier)`}),n(`depth`,{color:`var(--n-color)`},[f(`svg`,{opacity:`var(--n-opacity)`,transition:`opacity .3s var(--n-bezier)`})]),f(`svg`,{height:`1em`,width:`1em`})]),m={...r.props,depth:[String,Number],size:[Number,String],color:String,component:[Object,Function]},h=s({_n_icon__:!0,name:`Icon`,inheritAttrs:!1,props:m,setup(n){let{mergedClsPrefixRef:i,inlineThemeDisabled:a}=t(n),s=r(`Icon`,`-icon`,p,l,n,i),c=o(()=>{let{depth:e}=n,{common:{cubicBezierEaseInOut:t},self:r}=s.value;if(e!==void 0){let{color:n,[`opacity${e}Depth`]:i}=r;return{"--n-bezier":t,"--n-color":n,"--n-opacity":i}}return{"--n-bezier":t,"--n-color":``,"--n-opacity":``}}),u=a?d(`icon`,o(()=>`${n.depth||`d`}`),c,n):void 0;return{mergedClsPrefix:i,mergedStyle:o(()=>{let{size:t,color:r}=n;return{fontSize:e(t),color:r}}),cssVars:a?void 0:c,themeClass:u?.themeClass,onRender:u?.onRender}},render(){let{$parent:e,depth:t,mergedClsPrefix:n,component:r,onRender:a,themeClass:o}=this;return e?.$options?._n_icon__&&c(`icon`,"don't wrap `n-icon` inside `n-icon`"),a?.(),i(`i`,u(this.$attrs,{role:`img`,class:[`${n}-icon`,o,{[`${n}-icon--depth`]:t,[`${n}-icon--color-transition`]:t!==void 0}],style:[this.cssVars,this.mergedStyle]}),r?i(r):this.$slots.default?.())}});export{h as t};

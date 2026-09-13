@@ -3,7 +3,7 @@ import { ref, watch, nextTick, computed } from 'vue'
 import { NInput, NButton, NSelect, NRadioGroup, NRadioButton } from 'naive-ui'
 import {
   Send, Sparkles, Loader2, ListChecks, Code2, FileText,
-  Table2, Search, Bug, Wand2, Palette, Image, Braces, Globe, Square, File as FileIco, X, ShieldCheck,
+  Table2, Search, Bug, Wand2, Palette, Image, Braces, Globe, Square, File as FileIco, X, ShieldCheck, Paperclip,
 } from 'lucide-vue-next'
 import { state, stopChat, setMode, sendText } from '../store'
 import { wb, setModel } from '../workbench'
@@ -57,6 +57,12 @@ const modelOptions = computed(() =>
   (wb.runtime.models.length ? wb.runtime.models : [wb.runtime.model]).filter(Boolean)
     .map((m) => ({ label: m, value: m })),
 )
+
+// 触发器宽度随当前模型名自适应，保证完整显示不截断（约 7.5px/字符 + 箭头/内边距）
+const modelW = computed(() => {
+  const len = (wb.runtime.model || '').length
+  return Math.round(Math.min(Math.max(len * 7.5 + 46, 128), 320))
+})
 
 async function submit(): Promise<void> {
   if (busy.value || sending.value) return // 进行中禁止重复发送
@@ -185,13 +191,13 @@ watch(() => state.current, () => { draft.value = '' })
 
       <template v-else>
         <MessageBubble v-for="(m, i) in state.messages" :key="'h' + i" :msg="m" @open-file="(p: string) => emit('open-file', p)" />
-        <!-- 等待模型回复：shimmer 呼吸占位（避免发送后聊天区毫无反馈） -->
+        <!-- 等待模型回复：轻量占位（回复中 + 三点动画） -->
         <div v-if="state.waiting && !state.live" class="msg assistant">
           <div class="avatar-holder">
             <span class="ai-badge"><Sparkles :size="15" /></span>
           </div>
           <div class="bubble waiting-bubble">
-            <span class="shimmer-text">正在思考</span>
+            <span class="waiting-text">回复中</span>
             <span class="dots" aria-label="加载中"><i></i><i></i><i></i></span>
           </div>
         </div>
@@ -230,6 +236,10 @@ watch(() => state.current, () => { draft.value = '' })
           @paste="onPaste"
         />
         <div class="composer-bar">
+          <!-- 附件上传：点击选择文件（拖拽/粘贴同样支持） -->
+          <NButton quaternary circle size="small" class="up-btn" title="上传附件" @click="fileRef?.click()">
+            <template #icon><Paperclip :size="15" /></template>
+          </NButton>
           <!-- 权限模式：模型选择左侧 -->
           <NRadioGroup
             class="composer-mode"
@@ -251,6 +261,8 @@ watch(() => state.current, () => { draft.value = '' })
             :value="wb.runtime.model"
             :options="modelOptions"
             :consistent-menu-width="false"
+            :bordered="false"
+            :style="{ width: modelW + 'px' }"
             placeholder="模型"
             @update:value="onModel"
           />
