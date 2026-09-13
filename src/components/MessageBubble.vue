@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch, onBeforeUnmount } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { NAvatar } from 'naive-ui'
@@ -34,12 +34,13 @@ function withLocalImages(html: string): string {
 
 marked.setOptions({ gfm: true, breaks: true })
 
-// 外链统一新窗口打开并隔离 opener
+// 外链统一新窗口打开并隔离 opener；markdown 图片标记 md-img（点击放大）
 DOMPurify.addHook('afterSanitizeAttributes', (node) => {
   if (node.tagName === 'A') {
     node.setAttribute('target', '_blank')
     node.setAttribute('rel', 'noopener noreferrer')
   }
+  if (node.tagName === 'IMG') node.classList.add('md-img')
 })
 
 const props = defineProps<{ msg: Message; streaming?: boolean }>()
@@ -149,41 +150,57 @@ function pick(obj: Record<string, unknown> | null, ...keys: string[]): string {
   return ''
 }
 
-/** 语义化标题：修改 xxx / 删除 xxx / 执行脚本 xxx / 运行命令 xxx；附带可点击的文件路径。 */
+/** 语义化标题：动作名 + 关键参数摘要（url / 搜索词 / 命令等）。
+ *  文件路径不再拼进标题（与 tn-path 重复），统一由 tn-path 单独展示并可点击。 */
 function toolSummary(tc: ToolCall): { title: string; path?: string } {
   const obj = parseInput(tc.input)
   const path = pick(obj, 'path', 'file', 'file_path', 'dir', 'directory')
-  // 仅当能定位到具体路径时标题才附带详细内容，其余只显示动作名（详情在展开的 JSON 里）
+  // 参数摘要截断：超长显示省略号，防止撑爆工具节点标题行
+  const snip = (s: string, n = 48) => (s.length > n ? s.slice(0, n) + '…' : s)
   switch (tc.name) {
     case 'run_python':
       return { title: '执行脚本' }
     case 'run_command':
     case 'run_shell':
-    case 'bash':
-      return { title: '运行命令' }
+    case 'bash': {
+      const cmd = pick(obj, 'command', 'cmd', 'script')
+      return { title: cmd ? `运行命令 ${snip(cmd, 42)}` : '运行命令' }
+    }
     case 'write_file':
-      return { title: path ? `添加 ${path}` : '添加文件', path: path || undefined }
+      return { title: '添加文件', path: path || undefined }
     case 'edit_file':
-      return { title: path ? `修改 ${path}` : '修改文件', path: path || undefined }
+      return { title: '修改文件', path: path || undefined }
     case 'delete_file':
-      return { title: path ? `删除 ${path}` : '删除文件', path: path || undefined }
+      return { title: '删除文件', path: path || undefined }
     case 'make_dir':
-      return { title: path ? `添加目录 ${path}` : '添加目录', path: path || undefined }
+      return { title: '添加目录', path: path || undefined }
     case 'read_file':
-      return { title: path ? `读取 ${path}` : '读取文件', path: path || undefined }
-    case 'list_dir':
-      return { title: path ? `浏览目录 ${path}` : '浏览目录', path: path || undefined }
-    case 'search_files':
-      return path ? { title: `搜索 ${path}`, path } : { title: '搜索' }
-    case 'web_search':
-      return { title: '联网搜索' }
+      return { title: '读取文件', path: path || undefined }
+    case 'list_dir': {
+      const p = (path || '').trim()
+      // 浏览根目录（. / ./ / 空）时显示「浏览工作目录」，而不是突兀的 "."
+      return !p || p === '.' || p === './' ? { title: '浏览工作目录' } : { title: '浏览目录', path: p }
+    }
+    case 'search_files': {
+      const kw = pick(obj, 'pattern', 'query', 'keyword', 'kw')
+      return kw ? { title: `搜索 “${snip(kw, 36)}”` } : { title: '搜索' }
+    }
+    case 'web_search': {
+      const kw = pick(obj, 'query', 'q', 'keyword', 'search')
+      return kw ? { title: `联网搜索 ${snip(kw, 42)}` } : { title: '联网搜索' }
+    }
     case 'web_fetch':
-    case 'fetch_url':
-      return { title: '抓取网页' }
-    case 'calculator':
-      return { title: '计算' }
+    case 'fetch_url': {
+      const url = pick(obj, 'url', 'link', 'href')
+      // 标题带上目标网址（剥掉协议头，摘要展示）
+      return url ? { title: `抓取网页 ${snip(url.replace(/^https?:\/\//, ''), 54)}` } : { title: '抓取网页' }
+    }
+    case 'calculator': {
+      const expr = pick(obj, 'expression', 'expr')
+      return expr ? { title: `计算 ${snip(expr, 40)}` } : { title: '计算' }
+    }
     default:
-      return path ? { title: `${toolLabel(tc.name)} ${path}`, path } : { title: toolLabel(tc.name) }
+      return path ? { title: toolLabel(tc.name), path } : { title: toolLabel(tc.name) }
   }
 }
 
@@ -215,6 +232,27 @@ function fmtAttachSize(n: number): string {
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
   return `${(n / 1024 / 1024).toFixed(1)} MB`
 }
+
+// ===================== markdown 图片点击放大（lightbox） =====================
+// 事件委托：点击正文里带 md-img 标记的图片 → 全屏遮罩大图预览（点遮罩 / Esc 关闭）
+const lightbox = ref<string | null>(null)
+function onMdClick(e: MouseEvent): void {
+  const t = e.target as HTMLElement
+  if (t.tagName === 'IMG' && t.classList.contains('md-img')) {
+    lightbox.value = (t as HTMLImageElement).src
+  }
+}
+function closeLightbox(): void {
+  lightbox.value = null
+}
+watch(lightbox, (v, old) => {
+  if (v && !old) window.addEventListener('keydown', onLbKeydown)
+  else if (!v && old) window.removeEventListener('keydown', onLbKeydown)
+})
+function onLbKeydown(e: KeyboardEvent): void {
+  if (e.key === 'Escape') closeLightbox()
+}
+onBeforeUnmount(() => window.removeEventListener('keydown', onLbKeydown))
 
 /** 附件类型标签：无扩展名显示「文件」 */
 function attachType(name: string): string {
@@ -272,7 +310,7 @@ function attachType(name: string): string {
 
         <!-- 按发生顺序交错渲染：文本段 / 工具组段 -->
         <template v-for="(seg, si) in segments" :key="si">
-          <div v-if="seg.kind === 'text'" class="md seg-text" v-html="withLocalImages(DOMPurify.sanitize(marked.parse(seg.text, { async: false })))"></div>
+          <div v-if="seg.kind === 'text'" class="md seg-text" @click="onMdClick" v-html="withLocalImages(DOMPurify.sanitize(marked.parse(seg.text, { async: false })))"></div>
           <div v-else class="tool-nodes">
             <div
               v-for="(tc, ti) in seg.calls"
@@ -315,5 +353,12 @@ function attachType(name: string): string {
         <span v-if="streaming" class="cursor"></span>
       </template>
     </div>
+
+    <!-- markdown 图片全屏预览（#5）：点遮罩 / Esc 关闭 -->
+    <Teleport to="body">
+      <div v-if="lightbox" class="img-lightbox" @click="closeLightbox">
+        <img :src="lightbox" alt="预览" />
+      </div>
+    </Teleport>
   </div>
 </template>

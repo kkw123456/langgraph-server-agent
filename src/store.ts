@@ -219,17 +219,26 @@ function applyEvent(msg: WsEvent): void {
 }
 
 // ===================== 会话 =====================
-export async function loadConvs(): Promise<void> {
+// in-flight 去重：Shell（全路由常驻）与 Home 挂载都可能触发首次加载，
+// 避免并发双请求；轮询/事件刷新不受影响
+let convsInflight: Promise<void> | null = null
+
+export function loadConvs(): Promise<void> {
+  if (convsInflight) return convsInflight
   // 仅首次拉取时显示列表骨架（轮询/事件后刷新不闪烁）
   const first = state.convs.length === 0
   if (first) state.convsLoading = true
-  try {
-    state.convs = await api.get<Conversation[]>('/api/conversations')
-    const cur = state.convs.find((c) => c.id === state.current)
-    state.running = !!cur?.running
-  } finally {
-    if (first) state.convsLoading = false
-  }
+  convsInflight = (async () => {
+    try {
+      state.convs = await api.get<Conversation[]>('/api/conversations')
+      const cur = state.convs.find((c) => c.id === state.current)
+      state.running = !!cur?.running
+    } finally {
+      if (first) state.convsLoading = false
+      convsInflight = null
+    }
+  })()
+  return convsInflight
 }
 
 /** 按顶部工具栏的搜索关键字过滤后的会话列表。 */

@@ -15,7 +15,7 @@ import {
   Puzzle,
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
-import { state, newChat, selectConv, deleteConv, renameConv, filteredConvs, closeWs } from '../store'
+import { state, newChat, selectConv, deleteConv, renameConv, filteredConvs, closeWs, loadConvs } from '../store'
 import { loadRuntime } from '../workbench'
 import { logout as doLogout } from '../auth'
 import { useBreakpoint } from '../composables/useBreakpoint'
@@ -134,6 +134,9 @@ function onUnauthorized(): void {
 }
 
 onMounted(() => {
+  // 会话列表由外壳层加载（#6）：侧栏全路由常驻，直接进入功能页/刷新非首页路由
+  // 也要有会话数据与加载骨架，不能只在首页组件里加载（Home 内的轮询保留）
+  void loadConvs()
   loadRuntime()
   window.addEventListener('lg:unauthorized', onUnauthorized)
 })

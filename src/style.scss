@@ -155,6 +155,19 @@ body {
 .cs-nav-primary:hover { color: var(--accent); background: var(--accent-weak); }
 .cs-nav-active { background: var(--accent-weak); color: var(--accent); }
 
+/* 移动端抽屉「新建任务」主按钮（#7）：抽屉无菜单导航时的醒目入口 */
+.cs-drawer-new { padding: 8px 10px 10px; border-bottom: 1px solid var(--border); flex: 0 0 auto; }
+.cs-newtask-btn {
+  width: 100%; display: flex; align-items: center; justify-content: center; gap: 7px;
+  padding: 10px 0; border: none; border-radius: 12px; cursor: pointer;
+  background: var(--accent-grad); color: #fff;
+  font-size: 13.5px; font-weight: 600; font-family: inherit;
+  box-shadow: 0 3px 12px rgba(24, 160, 88, .28);
+  transition: transform .12s, box-shadow .12s, filter .12s;
+  &:active { transform: scale(.985); box-shadow: 0 2px 8px rgba(24, 160, 88, .24); }
+  &:hover { filter: brightness(1.04); box-shadow: 0 4px 14px rgba(24, 160, 88, .34); }
+}
+
 /* ============ 收起态：竖向图标 rail ============ */
 .cs-rail {
   height: 100%; display: flex; flex-direction: column; align-items: center;
@@ -359,6 +372,21 @@ body {
 .md th { background: var(--hover); font-weight: 600; }
 .md hr { border: none; border-top: 1px solid var(--border); margin: 12px 0; }
 .md img { max-width: 100%; border-radius: 8px; }
+/* markdown 图片点击放大（#5）：zoom-in 光标提示可点 */
+.md img.md-img { cursor: zoom-in; }
+
+/* markdown 图片全屏预览遮罩 */
+.img-lightbox {
+  position: fixed; inset: 0; z-index: 300;
+  background: rgba(16, 18, 20, .82);
+  display: flex; align-items: center; justify-content: center;
+  cursor: zoom-out; animation: fade-in .16s ease;
+  img {
+    max-width: min(94vw, 1500px); max-height: 90vh;
+    border-radius: 10px; box-shadow: 0 18px 60px rgba(0, 0, 0, .5);
+    animation: pop-in .18s ease;
+  }
+}
 
 /* ---- 思考过程（自绘折叠，无箭头 icon） ---- */
 .think-box {
@@ -395,15 +423,24 @@ body {
   background: var(--accent-weak); color: var(--accent);
 }
 .tool-node.running .tn-ico { background: rgba(24, 160, 88, .16); }
-.tn-name { font-size: 12.5px; font-weight: 600; flex: 0 0 auto; }
+.tn-name {
+  font-size: 12.5px; font-weight: 600; flex: 0 1 auto; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  /* 标题带参数摘要（url/命令/搜索词）时防撑爆，给路径 chip 留出空间 */
+  max-width: 58%;
+}
 .tn-state { flex: 0 0 auto; color: var(--accent); margin-left: auto; } /* 收起/展开 icon 固定在最右 */
 .tn-done { color: var(--ok); }
 
 /* ---- 等待模型回复的 shimmer 占位 ---- */
 .waiting-bubble { display: inline-flex; align-items: center; gap: 10px; }
 
-/* ---- 消息区骨架屏（#60）：模拟对话布局 ---- */
-.msg-skeleton { display: flex; flex-direction: column; gap: 22px; padding: 18px 4px; }
+/* ---- 消息区骨架屏（#60）：模拟对话布局；宽度与输入框/气泡对齐（#2） ---- */
+.msg-skeleton {
+  display: flex; flex-direction: column; gap: 22px;
+  width: 100%; max-width: var(--chat-w); margin: 0 auto;
+  padding: 18px 4px;
+}
 .skel-row { display: flex; align-items: flex-start; gap: 10px; }
 .skel-row.mine { flex-direction: row-reverse; }
 .skel-avatar { flex: 0 0 auto; margin-top: 2px; }
@@ -593,6 +630,9 @@ body {
 
 /* 文件预览区 */
 .pv-scroll { flex: 1; min-height: 0; }
+/* 预览内容铺满容器（#1）：短文件时背景/高亮区也撑满整个预览区高度 */
+.pv-scroll .n-scrollbar-content { min-height: 100%; display: flex; flex-direction: column; }
+.pv-scroll .file-content, .pv-scroll .code-view { flex: 1; }
 .pv-viewer { flex: 1; min-height: 0; display: flex; }
 .pv-viewer flyfish-file-viewer { width: 100%; height: 100%; display: block; }
 
@@ -646,10 +686,14 @@ body {
 .file-item.dir .fi-icon, .file-item.dir .fi-arrow { color: var(--accent); }
 .file-item.dir.open .fi-icon { color: var(--accent); }
 .fi-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.fi-meta { font-size: 11px; min-width: 56px; text-align: right; flex: 0 0 auto; font-variant-numeric: tabular-nums; }
-.fi-time { min-width: 78px; flex: 0 0 78px; text-align: right; font-variant-numeric: tabular-nums; }
-.fi-dl { opacity: 0; flex: 0 0 auto; }
-.file-item:hover .fi-dl { opacity: 1; }
+/* 大小/时间列：右对齐、等宽数字；hover 才显示（#4），触屏设备直接显示 */
+.fi-meta { font-size: 11px; min-width: 56px; text-align: right; flex: 0 0 auto; font-variant-numeric: tabular-nums; opacity: 0; transition: opacity .12s; }
+.fi-time { min-width: 78px; flex: 0 0 78px; text-align: right; font-variant-numeric: tabular-nums; opacity: 0; transition: opacity .12s; }
+.fi-dl { opacity: 0; flex: 0 0 auto; transition: opacity .12s; }
+.file-item:hover .fi-meta, .file-item:hover .fi-time, .file-item:hover .fi-dl { opacity: 1; }
+@media (hover: none) {
+  .fi-meta, .fi-time, .file-item .fi-dl { opacity: 1; }
+}
 .file-content {
   margin: 0; padding: 14px; font-family: "SF Mono", Consolas, monospace; font-size: 12.5px;
   line-height: 1.55; white-space: pre-wrap; word-break: break-word; background: #fbfcfd;

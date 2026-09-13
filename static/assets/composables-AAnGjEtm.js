@@ -1,1 +1,0 @@
-import{Yt as e,h as t,pr as n}from"./index-BKnoSBpI.js";function r(){let r=n(t,null);return r===null&&e(`use-dialog`,`No outer <n-dialog-provider /> founded.`),r}export{r as t};

@@ -271,6 +271,14 @@ function onUser(key: string | number): void {
       </span>
     </nav>
 
+    <!-- 移动端抽屉无菜单导航，单独提供「新建任务」主按钮（#7） -->
+    <div v-if="!showNav" class="cs-drawer-new">
+      <button class="cs-newtask-btn" @click="$emit('newChat')">
+        <Plus :size="16" />
+        <span>新建任务</span>
+      </button>
+    </div>
+
     <!-- 分组会话列表 -->
     <div class="cs-groups">
       <!-- 首次加载骨架（#61） -->

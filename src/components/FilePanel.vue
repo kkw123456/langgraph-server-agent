@@ -6,7 +6,7 @@ import { ref, watch, computed } from 'vue'
 import { NButton, NEmpty, NScrollbar, NAlert } from 'naive-ui'
 import {
   RotateCw, Download, FolderClosed, FolderOpen,
-  ChevronRight, ChevronDown,
+  ChevronRight, ChevronDown, Loader2,
 } from 'lucide-vue-next'
 import { state } from '../store'
 import type { FileEntry, FileResponse } from '../types'
@@ -162,7 +162,8 @@ watch(() => state.filesTick, () => { rebuild() })
     <div class="file-toolbar">
       <span class="file-path">
         <FolderClosed :size="14" /> 会话工作目录
-        <span v-if="loading" class="muted">加载中…</span>
+        <!-- 加载中用旋转 icon（#8）：不占宽度跳变，视觉更轻 -->
+        <Loader2 v-if="loading" :size="13" class="spin" />
       </span>
       <NButton quaternary circle size="small" title="刷新文件列表" @click="rebuild()">
         <template #icon><RotateCw :size="15" /></template>

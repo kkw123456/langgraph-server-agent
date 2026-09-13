@@ -1,8 +1,8 @@
 <script setup lang="ts">
 // 主界面（对话）：聊天区 + 右侧结果面板。
 // 会话侧栏已提升到 Shell（全路由常驻），本组件只承载中间对话与右侧面板两列。
-// 右面板：左侧竖向图标（产物/所有文件/变更预览）+ 手写多标签文件预览（file-viewer 渲染非文本）。
-// 无预览标签时功能面板常驻主体；有预览时 hover 左侧图标下拉出对应面板。
+// 右面板：头部功能图标（产物/所有文件）+ 手写多标签文件预览（file-viewer 渲染非文本）。
+// 无预览标签时功能面板常驻主体；有预览时 hover 头部图标下拉出对应面板。
 // <flyfish-file-viewer> Web Component（非文本文件预览）按需加载：
 // web-full 静态依赖 preset-all（全部渲染器），若在模块顶层静态 import，
 // 渲染器 chunk 会全部进入构建产物预加载，弱网下首屏直接超时。
@@ -55,7 +55,7 @@ import diff from 'highlight.js/lib/languages/diff'
 import 'highlight.js/styles/github-dark.css'
 import {
   PanelRightClose, PanelRightOpen,
-  FileText, FolderClosed, GitCompare, Maximize2, Minimize2, Plus, RotateCw, Sparkles,
+  FileText, FolderClosed, Maximize2, Minimize2, Plus, RotateCw, Sparkles,
   X, List,
 } from 'lucide-vue-next'
 import {
@@ -109,7 +109,7 @@ const resizing = ref(false)
 const fullscreen = ref(false)
 
 // ---- 右面板功能视图与文件预览标签 ----
-type SideView = 'artifacts' | 'files' | 'diff'
+type SideView = 'artifacts' | 'files'
 const sideView = ref<SideView>('files')
 
 // 已打开的文件预览标签（手写 tabs）：点击文件已存在则切换，不存在则新开
@@ -153,11 +153,10 @@ function onTabsWheel(e: WheelEvent): void {
   }
 }
 
-// 左侧功能图标（产物 / 所有文件 / 变更预览）
+// 左侧功能图标（产物 / 所有文件）
 const sideIcons: { key: SideView; label: string; icon: unknown }[] = [
   { key: 'artifacts', label: '产物', icon: Sparkles },
   { key: 'files', label: '所有文件', icon: FolderClosed },
-  { key: 'diff', label: '变更预览', icon: GitCompare },
 ]
 
 /** 打开/切换文件预览标签：已存在直接切换，否则拉取内容后新开。
@@ -287,9 +286,10 @@ const overlay = computed(() => bp.overlayPanel)
 // 768-1024 的 PC 窄窗口仍显示桌面消息头部 .c-head（此前误用 overlay 导致窄窗口无头部）
 const isXs = computed(() => bp.isXs)
 
-// 面板实际占据的宽度：收起为 0
+// 面板实际占据的宽度：收起为 0；全屏时面板 fixed 覆盖视口，不再占 grid 列（对话区铺满）
 const panelCol = computed(() => {
   if (!props.showRight || !bp.isMd) return 0
+  if (fullscreen.value) return 0
   if (panelState.value === 'collapsed') return 0
   return panelWidth.value
 })
@@ -331,6 +331,12 @@ const artifacts = computed(() => {
 
 function togglePanel(): void {
   panelState.value = panelState.value === 'collapsed' ? 'full' : 'collapsed'
+}
+
+/** 收起面板：同时退出全屏（修复全屏态下点收起后 fixed 全屏仍覆盖导致"无法收起"）。 */
+function collapsePanel(): void {
+  fullscreen.value = false
+  panelState.value = 'collapsed'
 }
 
 // 移动端 header 的新建会话
@@ -585,7 +591,7 @@ onBeforeUnmount(() => {
               <component :is="fullscreen ? Minimize2 : Maximize2" :size="15" />
             </template>
           </NButton>
-          <NButton quaternary circle size="small" title="收起面板" @click="panelState = 'collapsed'">
+          <NButton quaternary circle size="small" title="收起面板" @click="collapsePanel">
             <template #icon><PanelRightClose :size="15" /></template>
           </NButton>
         </div>
@@ -593,7 +599,7 @@ onBeforeUnmount(() => {
 
       <!-- 主体：功能面板常驻（图标条已移至头部 #62）；有预览标签时显示文件预览 -->
       <div class="rp-wrap">
-        <!-- 功能面板：产物 / 所有文件 / 变更预览 -->
+        <!-- 功能面板：产物 / 所有文件 -->
         <div v-if="!activeTabData" class="rp-content">
           <!-- 产物 -->
           <div v-if="sideView === 'artifacts'" class="artifact-pane">
