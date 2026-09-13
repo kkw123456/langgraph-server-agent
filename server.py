@@ -137,9 +137,10 @@ class RunHandle:
     - done   : 是否已结束。
     """
 
-    def __init__(self, cid: str, mode: str = "auto"):
+    def __init__(self, cid: str, mode: str = "auto", user: str = ""):
         self.cid = cid
         self.mode = mode
+        self.user = user  # 发起本轮对话的用户：模型偏好按用户解析
         self.pending: asyncio.Future | None = None
         self.task: asyncio.Task | None = None
         self.buffer: list[dict] = []
@@ -179,12 +180,13 @@ RUNS: dict[str, RunHandle] = {}
 MODES: dict[str, str] = {}
 
 
-def _start_run(cid: str, content: str, attachments: list | None = None) -> RunHandle:
+def _start_run(cid: str, content: str, attachments: list | None = None, user: str = "") -> RunHandle:
     """创建并启动一轮后台对话（WebSocket 消息、自动化触发共用）。
 
     attachments: 用户消息携带的附件清单 [{path,name,size}]，随消息落库与回显。
+    user: 发起者用户名，用于按用户解析模型偏好（自动化触发为空 → .env 默认）。
     """
-    run = RunHandle(cid, MODES.get(cid, "auto"))
+    run = RunHandle(cid, MODES.get(cid, "auto"), user=user)
     RUNS[cid] = run
     run.task = asyncio.create_task(_run_wrapped(cid, content, run, attachments))
     return run
@@ -427,10 +429,17 @@ async def api_users_create(body: dict):
 
 @app.delete("/api/users/{username}", dependencies=[Depends(require_admin)])
 def api_users_delete(request: Request, username: str):
-    """删除用户；不可删除自己，防止误删最后一个管理员。"""
+    """删除用户；不可删除自己，防止误删最后一个管理员。
+
+    级联清理：该用户的 user 作用域模型/提供商（防孤儿数据）+ 模型偏好。
+    """
     if username == _current_user(request):
         return {"ok": False, "error": "不能删除当前登录的账号"}
     ok = users_db.delete_user(username)
+    if ok:
+        runtime.purge_user(username)
+        if agent_manager:
+            agent_manager.reset_user(username)
     return {"ok": ok, "error": "" if ok else "用户不存在"}
 
 
@@ -625,9 +634,12 @@ def api_runtime(request: Request):
     user = _current_user(request)
     role = _current_role(request)
     skills = registry.list()
+    cfg = agent_manager.get_cfg(user) if agent_manager else {
+        "model": config.MODEL, "base_url": config.OPENAI_BASE_URL,
+    }
     return {
-        "model": agent_manager.model_name if agent_manager else config.MODEL,
-        "base_url": agent_manager.base_url if agent_manager else config.OPENAI_BASE_URL,
+        "model": cfg["model"],
+        "base_url": cfg["base_url"],
         "role": role,
         "models": runtime.list_models(user),
         "models_scoped": runtime.list_default_models(user),
@@ -654,8 +666,29 @@ async def api_set_model(request: Request, body: dict):
         return {"ok": False, "error": f"模型 {name} 不在可用列表中，请先添加"}
     if agent_manager is None:
         return {"ok": False, "error": "Agent 尚未初始化"}
-    agent_manager.set_model(name, base_url=base_url, api_key=api_key)
-    return {"ok": True, "model": name, "base_url": agent_manager.base_url}
+    # 模型偏好按用户隔离（#67/#68）：只影响当前用户，不再全局共享
+    cfg = agent_manager.set_model(user, name, base_url=base_url, api_key=api_key)
+    return {"ok": True, "model": name, "base_url": cfg["base_url"]}
+
+
+def _retune_agent_models() -> None:
+    """模型/提供商删除后，把正用着「已不可见模型」的用户回退到其可见列表第一个。
+
+    模型偏好按用户隔离（#67/#68），需逐用户检查而非全局单值；
+    回退目标同样按该用户 resolve（默认组命中则显式回 .env 值）。
+    """
+    if agent_manager is None:
+        return
+    for u in agent_manager.pref_users():
+        cfg = agent_manager.get_cfg(u)
+        if cfg["model"] in runtime.list_models(u):
+            continue
+        remain = runtime.list_models(u)
+        if remain:
+            bu, ak = runtime.resolve(remain[0], u)
+            agent_manager.set_model(u, remain[0], base_url=bu, api_key=ak)
+        else:
+            agent_manager.reset_user(u)
 
 
 @app.post("/api/runtime/models", dependencies=[Depends(require_auth)])
@@ -704,17 +737,14 @@ def api_del_model(request: Request, name: str, scope: str = "user", provider: st
     owner = "" if scope == "system" else _current_user(request)
     if not runtime.del_model(name, provider, scope, owner):
         return {"ok": False, "error": "模型不存在或无权限"}
-    # 删除的是当前模型时回退到可见列表第一个
-    if agent_manager and agent_manager.model_name == name:
-        remain = runtime.list_models(owner)
-        if remain:
-            agent_manager.set_model(remain[0])
+    # 删除的模型正被某用户选用时，该用户回退到其可见列表第一个
+    _retune_agent_models()
     return {
         "ok": True,
         "models": runtime.list_models(owner),
         "models_scoped": runtime.list_default_models(owner),
         "providers": [_provider_public(x) for x in runtime.list_providers(owner)],
-        "model": agent_manager.model_name if agent_manager else None,
+        "model": agent_manager.get_cfg(_current_user(request))["model"] if agent_manager else None,
     }
 
 
@@ -756,17 +786,12 @@ def api_del_provider(request: Request, name: str, scope: str = "user"):
     owner = "" if scope == "system" else _current_user(request)
     if not runtime.del_provider(name, scope, owner):
         return {"ok": False, "error": "提供商不存在或无权限"}
-    # 正用着该提供商下的模型时，回退到可见列表第一个
-    if agent_manager:
-        cur = agent_manager.model_name
-        if cur and not runtime.model_exists(cur, owner):
-            remain = runtime.list_models(owner)
-            if remain:
-                agent_manager.set_model(remain[0])
+    # 正用着该提供商下模型的用户，回退到各自可见列表第一个
+    _retune_agent_models()
     return {
         "ok": True,
         "providers": [_provider_public(x) for x in runtime.list_providers(owner)],
-        "model": agent_manager.model_name if agent_manager else None,
+        "model": agent_manager.get_cfg(_current_user(request))["model"] if agent_manager else None,
     }
 
 
@@ -779,16 +804,11 @@ def api_del_provider_model(request: Request, name: str, model: str, scope: str =
     owner = "" if scope == "system" else _current_user(request)
     if not runtime.del_provider_model(name, model, scope, owner):
         return {"ok": False, "error": "该提供商下没有此模型或无权限"}
-    if agent_manager:
-        cur = agent_manager.model_name
-        if cur == model and not runtime.model_exists(cur, owner):
-            remain = runtime.list_models(owner)
-            if remain:
-                agent_manager.set_model(remain[0])
+    _retune_agent_models()
     return {
         "ok": True,
         "providers": [_provider_public(x) for x in runtime.list_providers(owner)],
-        "model": agent_manager.model_name if agent_manager else None,
+        "model": agent_manager.get_cfg(_current_user(request))["model"] if agent_manager else None,
     }
 
 
@@ -1000,7 +1020,7 @@ async def api_send(request: Request, cid: str, body: dict):
         {"path": str(a.get("path", "")), "name": str(a.get("name", "")), "size": int(a.get("size") or 0)}
         for a in (body.get("attachments") or []) if isinstance(a, dict) and a.get("path")
     ]
-    result = await run_turn(cid, content, None, atts)
+    result = await run_turn(cid, content, None, atts, user=_current_user(request))
     return {"ok": True, "assistant": result["assistant"]}
 
 
@@ -1060,7 +1080,7 @@ async def ws_endpoint(websocket: WebSocket, cid: str):
                     {"path": str(a.get("path", "")), "name": str(a.get("name", "")), "size": int(a.get("size") or 0)}
                     for a in atts if isinstance(a, dict) and a.get("path")
                 ]
-                run = _start_run(cid, data.get("content", ""), atts)
+                run = _start_run(cid, data.get("content", ""), atts, user=user)
                 run.subscribe(websocket)
                 # 注意：此处不 await run_turn，接收循环继续运行，
                 # 以便在「确认模式」下收到客户端的 tool_decision / cancel 消息。
@@ -1094,16 +1114,18 @@ async def ws_endpoint(websocket: WebSocket, cid: str):
             r.unsubscribe(websocket)
 
 
-async def run_turn(cid: str, content: str, run: RunHandle | None, attachments: list | None = None):
+async def run_turn(cid: str, content: str, run: RunHandle | None, attachments: list | None = None, user: str = ""):
     """执行一轮对话。
 
     run 为 None 时走非流式（REST 回退），强制为自动模式且不推送事件。
+    user 为发起者用户名（run.user 优先），用于按用户解析模型偏好。
     在「确认模式」下，工具调用会在执行前被中断并推送 tool_confirm 事件，
     等待客户端决策（approve / deny / cancel）后通过 Command(resume) 继续。
     所有事件经 RunHandle.emit 广播：多端可同时订阅，断线重连可回放续看。
     attachments 为用户消息的附件清单，随消息落库供前端回显。
     """
     mode = run.mode if run else "auto"
+    user = (run.user if run else "") or user
     token = workspace.current_workspace.set(workspace.get_workspace(cid))
     cancelled = False
     try:
@@ -1115,7 +1137,7 @@ async def run_turn(cid: str, content: str, run: RunHandle | None, attachments: l
         assistant = {"role": "assistant", "content": "", "tool_calls": []}
 
         try:
-            agent = agent_manager.get_agent()
+            agent = agent_manager.get_agent(user)
         except Exception as e:
             err = f"Agent 初始化失败: {e}"
             if run:

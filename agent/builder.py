@@ -1,10 +1,14 @@
 """LangGraph Agent 构建器：根据当前启用的技能动态编译 ReAct 图。
 
 支持运行时切换模型：``set_model()`` 后缓存失效，下次取用会按新模型重建图。
+
+模型选择按**用户隔离**（批次D #67/#68）：每个用户可各自选择模型/提供商，
+互不影响；未主动选择过的用户回落到 .env 默认配置。
 """
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
 
+import config
 from config import MODEL, OPENAI_API_KEY, OPENAI_BASE_URL, TEMPERATURE
 from skills.registry import SkillRegistry
 
@@ -15,35 +19,60 @@ class AgentManager:
         self.registry = registry
         self._cache: dict = {}
         self._cache_key = None
-        # 当前模型与对应的 OpenAI 兼容接口（可在运行时切换，初值取 .env 的默认提供商）
-        self.model_name = MODEL
-        self.base_url = OPENAI_BASE_URL
-        self.api_key = OPENAI_API_KEY
-        self.temperature = TEMPERATURE
+        # 每用户独立的模型偏好：user -> {model, base_url, api_key}
+        # 未记录的用户走 .env 默认（等价于 _default_cfg()）
+        self._prefs: dict[str, dict] = {}
 
-    def _model(self) -> ChatOpenAI:
-        if not self.api_key:
+    # ---------------- 模型配置（per-user） ----------------
+    @staticmethod
+    def _default_cfg() -> dict:
+        """默认组：直接取 .env 导入值（服务启动时的快照）。"""
+        return {"model": MODEL, "base_url": OPENAI_BASE_URL, "api_key": OPENAI_API_KEY}
+
+    def get_cfg(self, user: str = "") -> dict:
+        """取某用户当前生效的模型配置。"""
+        return self._prefs.get(user or "") or self._default_cfg()
+
+    def set_model(self, user: str, name: str, base_url: str | None = None, api_key: str | None = None) -> dict:
+        """按用户记忆模型选择。
+
+        base_url/api_key 传 None 表示该模型属于默认组（走 .env），
+        **显式回退**为 .env 值，避免沿用上一次提供商的地址（历史 bug：
+        从私有提供商模型切回默认模型时 base_url 未重置，导致 Connection error）。
+        """
+        cfg = {
+            "model": name,
+            "base_url": base_url if base_url is not None else OPENAI_BASE_URL,
+            "api_key": api_key if api_key is not None else OPENAI_API_KEY,
+        }
+        self._prefs[user or ""] = cfg
+        self._cache.clear()
+        self._cache_key = None
+        return cfg
+
+    def reset_user(self, user: str) -> None:
+        """清除某用户的模型偏好（用户被删除时调用），回落 .env 默认。"""
+        self._prefs.pop(user or "", None)
+
+    def pref_users(self) -> list[str]:
+        """所有设置了模型偏好的用户名。"""
+        return list(self._prefs.keys())
+
+    # ---------------- Agent 图构建 ----------------
+    def _model(self, user: str) -> ChatOpenAI:
+        cfg = self.get_cfg(user)
+        if not cfg["api_key"]:
             raise RuntimeError(
                 "未配置 api_key：请在 .env 中设置 OPENAI_API_KEY，或在「设置 → 模型管理」"
                 "为所选提供商填写密钥（支持任意 OpenAI 兼容接口）。"
             )
         return ChatOpenAI(
-            model=self.model_name,
-            api_key=self.api_key,
-            base_url=self.base_url,
-            temperature=self.temperature,
+            model=cfg["model"],
+            api_key=cfg["api_key"],
+            base_url=cfg["base_url"],
+            temperature=TEMPERATURE,
             streaming=True,
         )
-
-    def set_model(self, name: str, base_url: str | None = None, api_key: str | None = None) -> None:
-        """切换模型（可携带该模型所属提供商的接口地址与密钥），并让已编译的图失效。"""
-        self.model_name = name
-        if base_url is not None:
-            self.base_url = base_url
-        if api_key is not None:
-            self.api_key = api_key
-        self._cache.clear()
-        self._cache_key = None
 
     def _system_prompt(self) -> str:
         lines = [
@@ -66,13 +95,20 @@ class AgentManager:
             lines.append("\n（当前未启用任何技能包，仅进行普通对话。）")
         return "\n".join(lines)
 
-    def get_agent(self):
-        """按「启用技能集合 + 当前模型 + 接口地址」缓存编译好的图，任一变动即重建。"""
-        key = (frozenset(self.registry.enabled_ids()), self.model_name, self.base_url)
+    def get_agent(self, user: str = ""):
+        """按「启用技能集合 + 用户 + 模型配置」缓存编译好的图，任一变动即重建。"""
+        cfg = self.get_cfg(user)
+        key = (
+            frozenset(self.registry.enabled_ids()),
+            user or "",
+            cfg["model"],
+            cfg["base_url"],
+            cfg["api_key"],
+        )
         if self._cache_key != key:
             tools = self.registry.enabled_tools()
             agent = create_react_agent(
-                self._model(),
+                self._model(user),
                 tools=tools,
                 prompt=self._system_prompt(),
                 checkpointer=self.checkpointer,

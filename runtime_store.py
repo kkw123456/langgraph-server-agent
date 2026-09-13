@@ -245,3 +245,13 @@ class RuntimeStore:
             for r in rows:
                 return (r["base_url"] or None, r["api_key"] or None)
         return (None, None)
+
+    def purge_user(self, owner: str) -> None:
+        """删除用户时级联清理其 user 作用域的模型与提供商（防孤儿数据）。"""
+        conn = self._conn()
+        try:
+            with conn:
+                conn.execute("DELETE FROM models WHERE scope='user' AND owner=?", (owner,))
+                conn.execute("DELETE FROM providers WHERE scope='user' AND owner=?", (owner,))
+        except sqlite3.OperationalError:
+            raise
