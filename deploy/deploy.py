@@ -24,7 +24,8 @@ APP_DIR = "/opt/langgraph-agent"
 
 # 需要上传的内容（相对项目根）
 INCLUDE = [
-    "server.py", "config.py", "workspace.py", "workbench_store.py", "requirements.txt",
+    "server.py", "config.py", "workspace.py", "workbench_store.py",
+    "users_store.py", "runtime_store.py", "requirements.txt",
     "README.md", ".env.example",
     "agent", "conversation", "skills", "tools", "auth",
     "static", "deploy/server_setup.sh",
@@ -34,7 +35,10 @@ EXCLUDE_FILES = {".env"}
 
 # server 启动时直接 import 的顶层模块，必须在包内 —— 漏传会导致
 # 服务器上 ModuleNotFoundError 且只在启动日志里体现，容易漏看。
-REQUIRED_MODULES = ["server.py", "config.py", "workspace.py", "workbench_store.py"]
+REQUIRED_MODULES = [
+    "server.py", "config.py", "workspace.py", "workbench_store.py",
+    "users_store.py", "runtime_store.py",
+]
 
 
 def log(msg):
@@ -138,8 +142,12 @@ def main():
         log("执行服务器端部署脚本 ...")
         setup = f"{APP_DIR}/deploy/server_setup.sh"
         if args.no_deps:
-            # 跳过依赖安装：直接重启服务
-            run(client, f"cd {APP_DIR} && systemctl restart langgraph-agent && sleep 3 && systemctl is-active langgraph-agent")
+            # 跳过依赖安装：直接重启服务（轮询等待 active，最多 20s）
+            wait = ("for i in $(seq 1 10); do sleep 2; "
+                    "st=$(systemctl is-active langgraph-agent); "
+                    '[ "$st" = "active" ] && break; done; '
+                    "systemctl is-active langgraph-agent")
+            run(client, f"cd {APP_DIR} && systemctl restart langgraph-agent && {wait}")
         else:
             run(client, f"bash {setup}", timeout=1200)
 
