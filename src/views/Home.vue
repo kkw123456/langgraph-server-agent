@@ -9,7 +9,7 @@ import {
 import {
   MessageSquare, ChevronsRight, ChevronsLeft, PanelRightOpen,
   FileText, FolderClosed, GitCompare, Maximize2, Minimize2, Download, Sparkles,
-  PanelRight, X, PanelLeft, List,
+  PanelRight, X, List,
 } from 'lucide-vue-next'
 import {
   state, loadConvs, loadSkills, selectConv, newChat, deleteConv, renameConv,
@@ -81,15 +81,14 @@ watch(
 const gridTemplate = computed(() => {
   // 覆盖层模式：三列塌缩为单列，两侧以绝对定位浮在内容之上
   if (overlay.value) return 'minmax(0, 1fr)'
-  const sw = sidebarCollapsed.value ? 0 : sidebarWidth.value
+  // 收起态仅保留一条竖向图标 rail（宽度与 Shell 图标条一致）
+  const sw = sidebarCollapsed.value ? 56 : sidebarWidth.value
   if (!props.showRight) return `${sw}px minmax(0, 1fr) 0px`
   return `${sw}px minmax(0, 1fr) ${panelCol.value}px`
 })
 
-// 会话栏在桌面端常驻（除非被收起）；窄屏仅在抽屉打开时渲染
-const sidebarVisible = computed(() =>
-  overlay.value ? sidebarOpen.value : !sidebarCollapsed.value,
-)
+// 会话栏桌面端常驻（收起时由 ConversationSidebar 内部切为 rail 形态）；窄屏仅在抽屉打开时渲染
+const sidebarVisible = computed(() => (overlay.value ? sidebarOpen.value : true))
 // 右侧面板在窄屏仅在「展开」态渲染，收起时不占位
 const panelVisible = computed(() =>
   overlay.value ? props.showRight && panelState.value === 'full' : !!props.showRight,
@@ -272,15 +271,17 @@ onBeforeUnmount(() => {
     <!-- 窄屏抽屉遮罩：点击或按 Esc 关闭 -->
     <div v-if="overlay && sidebarOpen" class="shell-mask" @click="sidebarOpen = false"></div>
 
-    <!-- 列 1：会话侧栏（WorkBuddy 风格；窄屏为抽屉） -->
+    <!-- 列 1：会话侧栏（WorkBuddy 风格；桌面可收起为图标 rail；窄屏为抽屉） -->
     <aside v-if="sidebarVisible" class="sidebar">
       <ConversationSidebar
         :convs="convsFiltered"
         :current="state.current"
+        :collapsed="sidebarCollapsed && !overlay"
         @select="onSelectConv"
         @delete="onDeleteConv"
         @rename="onRenameConv"
         @collapse="onSidebarCollapse"
+        @expand="sidebarCollapsed = false"
         @new-chat="onCreate"
         @nav="onNav"
       />
@@ -290,7 +291,7 @@ onBeforeUnmount(() => {
     <section class="main">
       <header class="topbar">
         <div class="topic">
-          <!-- 窄屏：唤出会话列表抽屉 -->
+          <!-- 窄屏：唤出会话列表抽屉；桌面：显示会话图标 -->
           <NButton
             v-if="overlay"
             quaternary
@@ -301,18 +302,6 @@ onBeforeUnmount(() => {
             @click="sidebarOpen = true"
           >
             <template #icon><List :size="16" /></template>
-          </NButton>
-          <!-- 桌面：侧栏被收起时提供展开入口 -->
-          <NButton
-            v-else-if="sidebarCollapsed"
-            quaternary
-            circle
-            size="small"
-            class="topic-btn"
-            title="展开侧边栏"
-            @click="sidebarCollapsed = false"
-          >
-            <template #icon><PanelLeft :size="16" /></template>
           </NButton>
           <MessageSquare v-else :size="15" class="topic-ico" />
           <h1>{{ state.convTitle }}</h1>

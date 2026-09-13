@@ -1,29 +1,34 @@
 <script setup lang="ts">
-// 左侧会话侧栏（仿 WorkBuddy 布局）：
-//   顶栏（收起/搜索）→ 品牌行 → 导航 tabs（新建任务/项目/专家·技能·连接器/更多）
-//   → 按时间分组的会话卡片（图标 + 标题 + 相对时间 + 悬浮更多操作）
-//   → 底部用户菜单（头像 + 用户名 + 消息中心铃铛）。
+// 左侧会话侧栏（仿 WorkBuddy），两种形态：
+//   展开 sidebar：收起/搜索顶栏 → 菜单导航（平铺，无「更多」）→ 按时间分组的会话卡片
+//                 （图标 + 标题 + 相对时间 + 悬浮更多操作）→ 底部用户菜单。
+//   收起 rail：   仅一条竖向图标条——展开按钮 / 新建任务 / 会话列表，
+//                 hover 显示 tooltip；会话列表项 hover 向右下拉出分组会话面板。
 // 会话操作：点击选中、双击标题行内重命名、更多菜单里重命名/删除。
 import { computed, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { NAvatar, NButton, NDropdown, NEmpty, NInput, useDialog } from 'naive-ui'
 import type { DropdownOption } from 'naive-ui'
 import {
-  Bell, FolderKanban, MessageSquare, MoreHorizontal, PanelLeftClose,
-  Plus, Search, Sparkles, UserRound,
+  Bell, BookMarked, Clock, FolderClosed, Lightbulb, MessageSquare, MoreHorizontal,
+  PanelLeftClose, PanelLeftOpen, Plus, Puzzle, Search, Settings, Wand2,
 } from 'lucide-vue-next'
+import type { Component } from 'vue'
 import type { Conversation } from '../types'
 import { authState } from '../auth'
 
-const props = defineProps<{ convs: Conversation[]; current: string | null }>()
+const props = defineProps<{ convs: Conversation[]; current: string | null; collapsed?: boolean }>()
 const emit = defineEmits<{
   select: [id: string]
   delete: [id: string]
   rename: [id: string, title: string]
-  collapse: []
+  collapse: []  // 展开态顶栏：收起侧边栏
+  expand: []    // 收起态 rail：展开侧边栏
   newChat: []
   nav: [key: string]
 }>()
 
+const route = useRoute()
 const dialog = useDialog()
 
 // ===================== 顶栏搜索 =====================
@@ -53,6 +58,7 @@ const groups = computed(() => {
   }
   return g.filter((x) => x.items.length > 0)
 })
+const hasConvs = computed(() => groups.value.length > 0)
 
 /** 相对时间：刚刚 / N 分钟前 / N 小时前 / N 天前 / M月D日 */
 function relTime(ts?: number): string {
@@ -64,6 +70,34 @@ function relTime(ts?: number): string {
   if (diff < 7 * 86_400e3) return `${Math.floor(diff / 86_400e3)}天前`
   const d = new Date(ts * 1000)
   return `${d.getMonth() + 1}月${d.getDate()}日`
+}
+
+// ===================== 菜单导航（平铺，无「更多」下拉） =====================
+interface NavItem { key: string; label: string; icon: Component; primary?: boolean }
+const navItems: NavItem[] = [
+  { key: 'new', label: '新建任务', icon: Plus, primary: true },
+  { key: 'projects', label: '项目', icon: FolderClosed },
+  { key: 'experts', label: '专家·技能·连接器', icon: Puzzle },
+  { key: 'automation', label: '自动化', icon: Clock },
+  { key: 'library', label: '资料库', icon: BookMarked },
+  { key: 'inspiration', label: '灵感', icon: Lightbulb },
+  { key: 'skill-new', label: '新建技能', icon: Wand2 },
+  { key: 'settings', label: '设置', icon: Settings },
+]
+// 当前路由对应的高亮项（与 Shell 的 activeKey 规则一致）
+const activeNav = computed(() => {
+  const p = route.path
+  if (p.startsWith('/projects')) return 'projects'
+  if (p.startsWith('/experts')) return 'experts'
+  if (p.startsWith('/automation')) return 'automation'
+  if (p.startsWith('/library')) return 'library'
+  if (p.startsWith('/inspiration')) return 'inspiration'
+  if (p.startsWith('/settings')) return 'settings'
+  return ''
+})
+function onNavClick(item: NavItem): void {
+  if (item.key === 'new') emit('newChat')
+  else emit('nav', item.key)
 }
 
 // ===================== 行内重命名（双击标题触发） =====================
@@ -103,19 +137,6 @@ function onItemAction(id: string, key: string | number): void {
   }
 }
 
-// ===================== 导航 tabs =====================
-const moreOptions: DropdownOption[] = [
-  { label: '自动化', key: 'automation' },
-  { label: '资料库', key: 'library' },
-  { label: '灵感', key: 'inspiration' },
-  { type: 'divider', key: 'd1' },
-  { label: '新建技能', key: 'skill-new' },
-  { label: '设置', key: 'settings' },
-]
-function onMore(key: string | number): void {
-  emit('nav', String(key))
-}
-
 // ===================== 底部用户菜单 =====================
 const userOptions: DropdownOption[] = [
   { label: '设置', key: 'settings' },
@@ -128,7 +149,58 @@ function onUser(key: string | number): void {
 </script>
 
 <template>
-  <div class="cs-root">
+  <!-- ============ 收起态：竖向图标 rail ============ -->
+  <div v-if="collapsed" class="cs-rail">
+    <span class="cs-rail-item" @click="$emit('expand')">
+      <PanelLeftOpen :size="18" />
+      <span class="cs-tip">展开侧边栏</span>
+    </span>
+    <span class="cs-rail-item cs-rail-primary" @click="$emit('newChat')">
+      <Plus :size="18" />
+      <span class="cs-tip">新建任务</span>
+    </span>
+
+    <!-- 会话列表：hover 向右下拉出分组会话面板 -->
+    <div class="cs-flyout-host">
+      <span class="cs-rail-item">
+        <MessageSquare :size="18" />
+        <span class="cs-tip">会话列表</span>
+      </span>
+      <div class="cs-flyout">
+        <div class="cs-fly-head">会话列表</div>
+        <div class="cs-fly-body">
+          <div v-for="g in groups" :key="g.label" class="cs-fly-group">
+            <div class="cs-fly-group-title">{{ g.label }}</div>
+            <div
+              v-for="c in g.items"
+              :key="c.id"
+              class="cs-fly-item"
+              :class="{ active: c.id === current }"
+              @click="$emit('select', c.id)"
+            >
+              <MessageSquare :size="14" class="cs-fly-ico" />
+              <div class="cs-fly-main">
+                <div class="cs-fly-title">{{ c.title }}</div>
+                <div class="cs-fly-time">{{ relTime(c.updated_at) }}</div>
+              </div>
+              <span v-if="c.running" class="cs-run" title="正在回复">
+                <span class="run-dot"></span>运行中
+              </span>
+            </div>
+          </div>
+          <NEmpty
+            v-if="!hasConvs"
+            class="cs-empty"
+            size="small"
+            description="暂无会话"
+          />
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 展开态：完整侧栏 ============ -->
+  <div v-else class="cs-root">
     <!-- 顶栏：收起侧边栏 / 搜索 -->
     <div class="cs-topbar">
       <NButton quaternary circle size="small" title="收起侧边栏" @click="$emit('collapse')">
@@ -148,23 +220,19 @@ function onUser(key: string | number): void {
       <NInput v-model:value="kw" size="small" placeholder="搜索会话" clearable autofocus />
     </div>
 
-    <!-- 导航 tabs -->
-    <div class="cs-tabs">
-      <span class="cs-tab cs-tab-primary" title="新建对话" @click="$emit('newChat')">
-        <Plus :size="14" />新建任务
+    <!-- 菜单导航：平铺所有入口，无「更多」 -->
+    <nav class="cs-nav">
+      <span
+        v-for="item in navItems"
+        :key="item.key"
+        class="cs-nav-item"
+        :class="{ 'cs-nav-primary': item.primary, 'cs-nav-active': item.key === activeNav }"
+        @click="onNavClick(item)"
+      >
+        <component :is="item.icon" :size="16" />
+        <span class="cs-nav-label">{{ item.label }}</span>
       </span>
-      <span class="cs-tab" @click="$emit('nav', 'projects')">
-        <FolderKanban :size="14" />项目
-      </span>
-      <span class="cs-tab" @click="$emit('nav', 'experts')">
-        <UserRound :size="14" />专家·技能·连接器
-      </span>
-      <NDropdown trigger="click" :options="moreOptions" @select="onMore">
-        <span class="cs-tab">
-          <Sparkles :size="14" />更多
-        </span>
-      </NDropdown>
-    </div>
+    </nav>
 
     <!-- 分组会话列表 -->
     <div class="cs-groups">
@@ -215,7 +283,7 @@ function onUser(key: string | number): void {
         </div>
       </div>
       <NEmpty
-        v-if="!groups.length"
+        v-if="!hasConvs"
         class="cs-empty"
         size="small"
         :description="kw.trim() ? '无匹配会话' : '暂无会话，点上方「新建任务」开始'"
