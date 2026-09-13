@@ -2,6 +2,7 @@
 // 专家 · 技能 · 连接器页：技能用标签页承载，连接器为只读展示。
 // 技能的全部操作（启停/重载/新建/删除）与后端 /api/skills 打通。
 import { ref, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
 import { NTabs, NTabPane, NCard, NTag, NEmpty, useMessage } from 'naive-ui'
 import { Puzzle, Plug, Bot, Check, X as XIcon } from 'lucide-vue-next'
 import {
@@ -31,7 +32,12 @@ async function onSubmit(payload: CreateSkillPayload): Promise<void> {
   else message.error('创建失败: ' + (r.error || '未知错误'))
 }
 
-onMounted(() => loadSkills())
+// 侧栏「新建技能」入口跳转 /experts?new=1，进入本页时自动打开创建弹窗
+const route = useRoute()
+onMounted(() => {
+  void loadSkills()
+  if (route.query.new === '1') showModal.value = true
+})
 </script>
 
 <template>

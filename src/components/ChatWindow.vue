@@ -1,24 +1,31 @@
 <script setup lang="ts">
 import { ref, watch, nextTick, computed } from 'vue'
-import { NInput, NButton, NSelect, NIcon, NAvatar } from 'naive-ui'
+import { NInput, NButton, NSelect, NRadioGroup, NRadioButton, NIcon } from 'naive-ui'
 import {
-  Send, Sparkles, Loader2, Plus, Paperclip, Globe, ListChecks, Code2, FileText,
-  Table2, Search, Bug, Wand2, Palette, Image, Braces, Square, Bot,
+  Send, Sparkles, Loader2, Paperclip, Globe, ListChecks, Code2, FileText,
+  Table2, Search, Bug, Wand2, Palette, Image, Braces, Square, File as FileIco, X, ShieldCheck,
 } from 'lucide-vue-next'
-import { state, stopChat } from '../store'
+import { state, stopChat, setMode } from '../store'
 import { wb, setModel } from '../workbench'
 import MessageBubble from './MessageBubble.vue'
 
-const emit = defineEmits<{ send: [text: string] }>()
+const emit = defineEmits<{ send: [text: string, files: File[]] }>()
 const draft = ref('')
 const box = ref<HTMLElement | null>(null)
 const inputRef = ref<InstanceType<typeof NInput> | null>(null)
+const fileRef = ref<HTMLInputElement | null>(null)
 const scene = ref('日常办公')
+
+// 待上传附件：发送时先上传到会话工作目录再发消息
+const pendingFiles = ref<File[]>([])
+const MAX_FILES = 6
+const MAX_SIZE = 15 * 1024 * 1024
 
 // 会话进行中（等待回复 / 流式输出 / 工具执行）：发送键切换为停止键
 const busy = computed(() => state.waiting || state.running || !!state.live)
 const streaming = computed(() => !!state.live)
 const empty = computed(() => !state.messages.length && !state.live && !state.waiting)
+const uploading = computed(() => busy.value) // 附件选择仅阻断重复发送，上传在 send 内完成
 
 // 场景化快捷入口：点一下等于「新建会话 + 发送该指令」
 const SCENES: Record<string, { icon: unknown; title: string; desc: string; prompt: string }[]> = {
@@ -50,11 +57,12 @@ const modelOptions = computed(() =>
 )
 
 function submit(): void {
-  if (busy.value) return // 进行中禁止重复发送
+  if (busy.value || uploading.value) return // 进行中禁止重复发送
   const t = draft.value
-  if (!t.trim()) return
-  emit('send', t)
+  if (!t.trim() && !pendingFiles.value.length) return
+  emit('send', t, [...pendingFiles.value])
   draft.value = ''
+  pendingFiles.value = []
 }
 
 function useCard(p: string): void {
@@ -76,6 +84,31 @@ function scrollBottom(): void {
 
 async function onModel(v: string): Promise<void> {
   if (v && v !== wb.runtime.model) await setModel(v)
+}
+
+// ===================== 附件 =====================
+function pickFiles(): void {
+  if (busy.value) return
+  fileRef.value?.click()
+}
+function onFilesChosen(e: Event): void {
+  const input = e.target as HTMLInputElement
+  const list = Array.from(input.files || [])
+  for (const f of list) {
+    if (pendingFiles.value.length >= MAX_FILES) break
+    if (f.size > MAX_SIZE) continue
+    if (pendingFiles.value.some((x) => x.name === f.name && x.size === f.size)) continue
+    pendingFiles.value.push(f)
+  }
+  input.value = '' // 允许重复选择同名文件
+}
+function removeFile(i: number): void {
+  pendingFiles.value.splice(i, 1)
+}
+function fmtSize(n: number): string {
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+  return `${(n / 1024 / 1024).toFixed(1)} MB`
 }
 
 // 历史消息或流式消息变化均自动滚动到底部（含思考链与等待状态）
@@ -127,14 +160,14 @@ watch(() => state.current, () => { draft.value = '' })
 
       <template v-else>
         <MessageBubble v-for="(m, i) in state.messages" :key="'h' + i" :msg="m" />
-        <!-- 等待模型回复的 loading 气泡（避免发送后聊天区毫无反馈） -->
+        <!-- 等待模型回复：shimmer 呼吸占位（避免发送后聊天区毫无反馈） -->
         <div v-if="state.waiting && !state.live" class="msg assistant">
-          <NAvatar class="avatar assistant" round :size="30" color="#e8f0fe">
-            <Bot :size="16" color="#2f6feb" />
-          </NAvatar>
+          <div class="avatar-holder">
+            <span class="ai-badge"><Sparkles :size="15" /></span>
+          </div>
           <div class="bubble waiting-bubble">
+            <span class="shimmer-text">正在思考</span>
             <span class="dots" aria-label="加载中"><i></i><i></i><i></i></span>
-            <span class="muted tiny">正在思考…</span>
           </div>
         </div>
         <MessageBubble v-if="state.live" :msg="state.live" streaming />
@@ -143,6 +176,17 @@ watch(() => state.current, () => { draft.value = '' })
 
     <footer class="composer">
       <div class="composer-inner">
+        <!-- 待上传附件 chips -->
+        <div v-if="pendingFiles.length" class="attach-row">
+          <span v-for="(f, i) in pendingFiles" :key="f.name + f.size" class="attach-chip">
+            <FileIco :size="13" class="attach-ico" />
+            <span class="attach-name">{{ f.name }}</span>
+            <span class="attach-size muted">{{ fmtSize(f.size) }}</span>
+            <X :size="13" class="attach-x" title="移除" @click="removeFile(i)" />
+          </span>
+        </div>
+        <input ref="fileRef" type="file" multiple hidden @change="onFilesChosen" />
+
         <NInput
           ref="inputRef"
           v-model:value="draft"
@@ -154,20 +198,28 @@ watch(() => state.current, () => { draft.value = '' })
           @keydown="onKeydown"
         />
         <div class="composer-bar">
-          <!-- 次要操作按钮：手机尺寸下由 CSS 隐藏，把宽度留给输入与发送 -->
-          <NButton class="composer-aux" quaternary circle size="small" title="添加附件">
-            <template #icon><Plus :size="16" /></template>
-          </NButton>
-          <NButton class="composer-aux" quaternary circle size="small" title="引用文件">
+          <!-- 附件：选择文件，发送时上传到会话工作目录 -->
+          <NButton class="composer-aux" quaternary circle size="small" title="上传文件到工作目录" @click="pickFiles">
             <template #icon><Paperclip :size="16" /></template>
           </NButton>
-          <NButton class="composer-aux" quaternary circle size="small" title="联网检索">
-            <template #icon><Globe :size="16" /></template>
-          </NButton>
+          <!-- 权限模式：模型选择左侧 -->
+          <NRadioGroup
+            class="composer-mode"
+            :value="state.mode"
+            size="small"
+            @update:value="(v: string) => setMode(v as 'auto' | 'confirm')"
+          >
+            <NRadioButton value="auto" title="自动执行工具调用">
+              <span class="mode-ico"><Sparkles :size="12" /></span><span class="mode-full">自动</span>
+            </NRadioButton>
+            <NRadioButton value="confirm" title="工具调用前需要确认">
+              <span class="mode-ico"><ShieldCheck :size="12" /></span><span class="mode-full">确认</span>
+            </NRadioButton>
+          </NRadioGroup>
           <span class="grow"></span>
           <NSelect
             class="composer-model"
-            size="tiny"
+            size="small"
             :value="wb.runtime.model"
             :options="modelOptions"
             :consistent-menu-width="false"
@@ -188,21 +240,14 @@ watch(() => state.current, () => { draft.value = '' })
           <NButton
             v-else
             class="send-btn"
-            type="primary"
             circle
-            :disabled="!draft.trim()"
+            :disabled="!draft.trim() && !pendingFiles.length"
             title="发送"
             @click="submit"
           >
             <template #icon><Send :size="16" /></template>
           </NButton>
         </div>
-      </div>
-      <div class="composer-foot">
-        <span class="muted tiny">
-          <component :is="busy ? Loader2 : Sparkles" :size="12" :class="{ spin: busy }" />
-          {{ busy ? '智能体正在回复，可点击红色按钮停止…' : '智能体可能会调用工具，请留意确认提示' }}
-        </span>
       </div>
     </footer>
   </div>

@@ -1,23 +1,24 @@
 <script setup lang="ts">
 // 左侧会话侧栏（仿 WorkBuddy），两种形态：
-//   展开 sidebar：收起/搜索顶栏 → 菜单导航（平铺，无「更多」）→ 按时间分组的会话卡片
+//   展开 sidebar：品牌区 → 收起/搜索顶栏 → 菜单导航（平铺，无「更多」）→ 按时间分组的会话卡片
 //                 （图标 + 标题 + 相对时间 + 悬浮更多操作）→ 底部用户菜单。
-//   收起 rail：   仅一条竖向图标条——展开按钮 / 新建任务 / 会话列表，
+//   收起 rail：   品牌图标 → 展开按钮 / 新建任务 / 会话列表，
 //                 hover 显示 tooltip；会话列表项 hover 向右下拉出分组会话面板。
 // 会话操作：点击选中、双击标题行内重命名、更多菜单里重命名/删除。
+// 移动端抽屉形态：showNav=false 隐藏菜单导航，仅保留会话列表与用户菜单。
 import { computed, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { NAvatar, NButton, NDropdown, NEmpty, NInput, useDialog } from 'naive-ui'
 import type { DropdownOption } from 'naive-ui'
 import {
-  Bell, BookMarked, Clock, FolderClosed, Lightbulb, MessageSquare, MoreHorizontal,
+  Bell, BookMarked, Bot, Clock, FolderClosed, Lightbulb, Loader2, MessageSquare, MoreHorizontal,
   PanelLeftClose, PanelLeftOpen, Plus, Puzzle, Search, Settings, Wand2,
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
 import type { Conversation } from '../types'
 import { authState } from '../auth'
 
-const props = defineProps<{ convs: Conversation[]; current: string | null; collapsed?: boolean }>()
+const props = defineProps<{ convs: Conversation[]; current: string | null; collapsed?: boolean; showNav?: boolean }>()
 const emit = defineEmits<{
   select: [id: string]
   delete: [id: string]
@@ -29,7 +30,17 @@ const emit = defineEmits<{
 }>()
 
 const route = useRoute()
+const router = useRouter()
 const dialog = useDialog()
+const showNav = computed(() => props.showNav !== false)
+
+// 是否处于首页（聊天视图）：离开首页（功能页）时侧栏里会话项取消高亮，仅菜单高亮
+const isHome = computed(() => route.path === '/')
+
+// ===================== 品牌区：logo + 名称，点击回主页 =====================
+function goHome(): void {
+  if (route.path !== '/') router.push('/')
+}
 
 // ===================== 顶栏搜索 =====================
 const searchOpen = ref(false)
@@ -151,6 +162,9 @@ function onUser(key: string | number): void {
 <template>
   <!-- ============ 收起态：竖向图标 rail ============ -->
   <div v-if="collapsed" class="cs-rail">
+    <span class="cs-rail-item cs-rail-brand" title="LangGraph 工作台" @click="goHome">
+      <span class="cs-logo"><Bot :size="15" /></span>
+    </span>
     <span class="cs-rail-item" @click="$emit('expand')">
       <PanelLeftOpen :size="18" />
       <span class="cs-tip">展开侧边栏</span>
@@ -175,7 +189,7 @@ function onUser(key: string | number): void {
               v-for="c in g.items"
               :key="c.id"
               class="cs-fly-item"
-              :class="{ active: c.id === current }"
+              :class="{ active: isHome && c.id === current }"
               @click="$emit('select', c.id)"
             >
               <MessageSquare :size="14" class="cs-fly-ico" />
@@ -183,9 +197,7 @@ function onUser(key: string | number): void {
                 <div class="cs-fly-title">{{ c.title }}</div>
                 <div class="cs-fly-time">{{ relTime(c.updated_at) }}</div>
               </div>
-              <span v-if="c.running" class="cs-run" title="正在回复">
-                <span class="run-dot"></span>运行中
-              </span>
+              <Loader2 v-if="c.running" :size="13" class="spin cs-run-ico" title="正在回复" />
             </div>
           </div>
           <NEmpty
@@ -210,6 +222,12 @@ function onUser(key: string | number): void {
 
   <!-- ============ 展开态：完整侧栏 ============ -->
   <div v-else class="cs-root">
+    <!-- 品牌区：logo + 名称（位于新建任务上方），点击回主页 -->
+    <div class="cs-brand" @click="goHome">
+      <span class="cs-logo"><Bot :size="15" /></span>
+      <b class="cs-brand-name">LangGraph 工作台</b>
+    </div>
+
     <!-- 顶栏：收起侧边栏 / 搜索 -->
     <div class="cs-topbar">
       <NButton quaternary circle size="small" title="收起侧边栏" @click="$emit('collapse')">
@@ -229,8 +247,8 @@ function onUser(key: string | number): void {
       <NInput v-model:value="kw" size="small" placeholder="搜索会话" clearable autofocus />
     </div>
 
-    <!-- 菜单导航：平铺所有入口，无「更多」 -->
-    <nav class="cs-nav">
+    <!-- 菜单导航：平铺所有入口，无「更多」；移动端抽屉不展示 -->
+    <nav v-if="showNav" class="cs-nav">
       <span
         v-for="item in navItems"
         :key="item.key"
@@ -251,7 +269,7 @@ function onUser(key: string | number): void {
           v-for="c in g.items"
           :key="c.id"
           class="cs-item"
-          :class="{ active: c.id === current }"
+          :class="{ active: isHome && c.id === current }"
           @click="renamingId !== c.id && $emit('select', c.id)"
         >
           <MessageSquare :size="15" class="cs-item-ico" />
@@ -275,9 +293,7 @@ function onUser(key: string | number): void {
               <div class="cs-item-time">{{ relTime(c.updated_at) }}</div>
             </template>
           </div>
-          <span v-if="c.running" class="cs-run" title="正在回复">
-            <span class="run-dot"></span>运行中
-          </span>
+          <Loader2 v-if="c.running" :size="14" class="spin cs-run-ico" title="正在回复" />
           <div class="cs-item-actions" @click.stop>
             <NDropdown
               trigger="click"

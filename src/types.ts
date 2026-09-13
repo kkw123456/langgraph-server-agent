@@ -5,6 +5,8 @@ export interface ToolCall {
   name: string
   input: string
   output: string
+  /** 工具调用发生时正文已输出的长度：用于把消息还原为「文本→工具组→文本」交错序列 */
+  at?: number
 }
 
 export interface Message {
@@ -46,7 +48,7 @@ export type WsEvent =
   | { type: 'message_start' }
   | { type: 'token'; content: string }
   | { type: 'reasoning'; content: string }
-  | { type: 'tool_start'; name: string; input: string }
+  | { type: 'tool_start'; name: string; input: string; at?: number }
   | { type: 'tool_end'; output: string }
   | { type: 'message_end'; stopped?: boolean }
   | { type: 'error'; content: string }

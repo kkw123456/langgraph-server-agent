@@ -1,24 +1,26 @@
 <script setup lang="ts">
-// 应用外壳：顶部工具栏 + 内容区。
-// 导航入口：首页会话侧栏菜单（桌面）、窄屏汉堡抽屉、顶栏品牌（回主页）与设置按钮。
+// 应用外壳：左侧会话侧栏（全路由常驻）+ 内容区 + 移动端底部菜单。
 //
-// 内容区由 vue-router 承载，因此每个入口都是真页面，而不是仅做样式的占位。
-// 右侧结果面板只在对话页出现，其余页面独占内容区。
-//
-// 自适应策略：窄屏顶栏出现汉堡按钮唤出抽屉导航；
-// 顶栏内的搜索框、状态文字、用户名按可用宽度逐级收起。
-import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue'
+// 布局约定（v2）：
+// - 顶部 header 已移除，品牌区移入会话侧栏顶部（新建任务按钮上方）；
+// - 会话侧栏提升到外壳层：首页显示会话列表，切换到 专家/自动化/资料库 等
+//   功能页时侧栏保留，仅内容区切换（会话项随之取消高亮，菜单项保持高亮）；
+// - 移动端（<768px）：侧栏为抽屉（仅会话列表，无菜单导航），
+//   页面切换由底部菜单承载（项目 / 专家·技能·连接器 / 自动化 / 资料库 / 灵感）。
+import { computed, onMounted, onBeforeUnmount, watch, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { NButton, NInput, NIcon, NTooltip, useMessage, useDialog } from 'naive-ui'
+import { NAvatar, NDropdown, useMessage, useDialog } from 'naive-ui'
+import type { DropdownOption } from 'naive-ui'
 import {
-  Bot, Plus, Sparkles, Users, FolderClosed, Puzzle, Clock, MoreHorizontal,
-  BookMarked, Lightbulb, Search, LogOut, User, Settings, Menu, X,
+  BookMarked, Clock, Lightbulb,
+  MessageSquare, Puzzle,
 } from 'lucide-vue-next'
-import { state, newChat } from '../store'
+import type { Component } from 'vue'
+import { state, newChat, selectConv, deleteConv, renameConv, filteredConvs, closeWs } from '../store'
 import { loadRuntime } from '../workbench'
-import { authState } from '../auth'
-import { logout as doLogout } from '../auth'
+import { authState, logout as doLogout } from '../auth'
 import { useBreakpoint } from '../composables/useBreakpoint'
+import ConversationSidebar from '../components/ConversationSidebar.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -26,78 +28,111 @@ const message = useMessage()
 const dialog = useDialog()
 const bp = useBreakpoint()
 
-// 抽屉导航：仅在窄屏（<768px）由顶栏汉堡按钮唤出
-const drawer = ref(false)
+// 桌面端「收起侧边栏」状态：收起后仅显示竖向图标 rail
+const sidebarCollapsed = ref(false)
+// 移动端抽屉由全局 store 驱动（聊天区顶栏的列表按钮触发）
+const overlay = computed(() => bp.isXs)
+// 是否渲染侧栏：桌面常驻；移动端仅在抽屉打开时渲染
+const sidebarVisible = computed(() => (overlay.value ? state.sidebarOpen : true))
+// 桌面收起宽度与展开宽度一致沿用 --sidebar-w / 56px rail
+const sidebarCol = computed(() => {
+  if (overlay.value) return '0px'
+  return sidebarCollapsed.value ? '56px' : 'var(--sidebar-w)'
+})
 
-// 左侧竖向导航：与 WorkBuddy 一致，底部单独放资料库/灵感
-const navMain = [
-  { key: 'new', icon: Plus, label: '新建任务' },
-  { key: 'assistant', icon: Sparkles, label: '助理' },
-  { key: 'projects', icon: FolderClosed, label: '项目' },
-  { key: 'experts', icon: Puzzle, label: '专家 · 技能 · 连接器' },
-  { key: 'automation', icon: Clock, label: '自动化' },
-  { key: 'more', icon: MoreHorizontal, label: '更多' },
+// 跨断点收敛：变窄关抽屉；变宽恢复展开态
+watch(
+  () => bp.isXs,
+  () => {
+    state.sidebarOpen = false
+    document.body.style.overflow = ''
+  },
+)
+watch(
+  () => state.sidebarOpen,
+  (open) => {
+    if (overlay.value) document.body.style.overflow = open ? 'hidden' : ''
+  },
+)
+
+// ===================== 侧栏事件（全路由统一在此处理） =====================
+function onSelectConv(id: string): void {
+  state.sidebarOpen = false
+  if (route.path !== '/') router.push('/')
+  void selectConv(id)
+}
+async function onCreate(): Promise<void> {
+  state.sidebarOpen = false
+  await newChat()
+  if (route.path !== '/') router.push('/')
+}
+function onCollapse(): void {
+  if (overlay.value) state.sidebarOpen = false
+  else sidebarCollapsed.value = true
+}
+function onRename(id: string, title: string): void {
+  void renameConv(id, title).then(() => message.success('已重命名'))
+}
+function onDelete(id: string): void {
+  void deleteConv(id).then(() => message.success('会话已删除'))
+}
+function onNav(key: string): void {
+  if (key === 'logout') {
+    dialog.warning({
+      title: '退出登录',
+      content: '确定要退出当前账号吗？',
+      positiveText: '退出',
+      negativeText: '取消',
+      onPositiveClick: async () => {
+        closeWs()
+        await doLogout()
+        router.replace('/login')
+      },
+    })
+    return
+  }
+  const routes: Record<string, string> = {
+    projects: '/projects',
+    experts: '/experts',
+    automation: '/automation',
+    library: '/library',
+    inspiration: '/inspiration',
+    settings: '/settings',
+    'skill-new': '/experts?new=1',
+  }
+  const path = routes[key]
+  if (!path) return
+  state.sidebarOpen = false
+  if (route.fullPath !== path) router.push(path)
+}
+
+// ===================== 移动端底部菜单 =====================
+const tabItems: { key: string; label: string; icon: Component; path: string }[] = [
+  { key: 'home', label: '项目', icon: MessageSquare, path: '/' },
+  { key: 'experts', label: '专家·技能·连接器', icon: Puzzle, path: '/experts' },
+  { key: 'automation', label: '自动化', icon: Clock, path: '/automation' },
+  { key: 'library', label: '资料库', icon: BookMarked, path: '/library' },
+  { key: 'inspiration', label: '灵感', icon: Lightbulb, path: '/inspiration' },
 ]
-const navBottom = [
-  { key: 'library', icon: BookMarked, label: '资料库' },
-  { key: 'inspiration', icon: Lightbulb, label: '灵感' },
-]
-
-// 抽屉里展示的完整导航项：合并主/次导航，附带图标便于扫读
-const drawerNav = computed(() => [
-  ...navMain,
-  ...navBottom,
-  { key: 'settings', icon: Settings, label: '设置' },
-])
-
-// 当前激活的导航项：由路由路径反查
-const activeKey = computed(() => {
+const activeTab = computed(() => {
   const p = route.path
-  if (p.startsWith('/projects')) return 'projects'
+  if (p === '/') return 'home'
   if (p.startsWith('/experts')) return 'experts'
   if (p.startsWith('/automation')) return 'automation'
   if (p.startsWith('/library')) return 'library'
-  if (p.startsWith('/settings')) return 'settings'
   if (p.startsWith('/inspiration')) return 'inspiration'
-  return 'assistant'
+  return ''
 })
-
-const showRight = computed(() => route.path === '/')
-
-// 侧栏/抽屉切换时禁止内容区滚动穿透（移动端常见问题）
-watch(drawer, (open) => {
-  document.body.style.overflow = open ? 'hidden' : ''
-})
-
-const kw = computed({
-  get: () => state.searchKw,
-  set: (v: string) => { state.searchKw = v },
-})
-
-async function onNav(key: string): Promise<void> {
-  drawer.value = false
-  if (key === 'new') {
-    await newChat()
-    if (route.path !== '/') router.push('/')
-    return
-  }
-  if (key === 'settings') { router.push('/settings'); return }
-  if (key === 'more') { router.push('/settings'); return }
-  router.push(`/${key}`)
+function onTab(path: string): void {
+  if (route.path !== path) router.push(path)
 }
 
-function onLogout(): void {
-  dialog.warning({
-    title: '退出登录',
-    content: '确定要退出当前账号吗？',
-    positiveText: '退出',
-    negativeText: '取消',
-    onPositiveClick: async () => {
-      await doLogout()
-      router.replace('/login')
-    },
-  })
-}
+// ===================== 兜底用户入口（桌面侧栏 footer 已有，这里供移动端抽屉） =====================
+const userOptions: DropdownOption[] = [
+  { label: '设置', key: 'settings' },
+  { label: '退出登录', key: 'logout' },
+]
+const uname = computed(() => authState.username || 'admin')
 
 // 登录态失效：api.ts 在收到 401 时广播该事件
 function onUnauthorized(): void {
@@ -105,163 +140,157 @@ function onUnauthorized(): void {
   router.replace('/login')
 }
 
-// 断点跨越 768px 时关闭抽屉，避免桌面端残留遮罩
-watch(() => bp.isMd, (isWide) => { if (isWide) drawer.value = false })
-
-// 视口尺寸变化时退出右侧面板的全屏态，避免残留覆盖整个屏幕
-function onViewportChange(): void {
-  if (bp.isXs) drawer.value = false
-}
-
 onMounted(() => {
   loadRuntime()
   window.addEventListener('lg:unauthorized', onUnauthorized)
-  window.addEventListener('orientationchange', onViewportChange, { passive: true })
 })
 onBeforeUnmount(() => {
   window.removeEventListener('lg:unauthorized', onUnauthorized)
-  window.removeEventListener('orientationchange', onViewportChange)
   document.body.style.overflow = ''
 })
 </script>
 
 <template>
   <div class="app-root">
-    <!-- 顶部工具栏：品牌 / 模型切换 / 任务搜索 / 用户 -->
-    <header class="toolbar">
-      <!-- 窄屏：汉堡按钮唤出抽屉导航 -->
-      <NButton
-        v-if="!bp.isSm"
-        class="tb-burger"
-        quaternary
-        circle
-        size="small"
-        title="导航菜单"
-        @click="drawer = true"
-      >
-        <template #icon><Menu :size="17" /></template>
-      </NButton>
+    <div class="app-body" :class="{ 'as-overlay': overlay }" :style="{ gridTemplateColumns: overlay ? 'minmax(0,1fr)' : `${sidebarCol} minmax(0,1fr)` }">
+      <!-- 移动端抽屉遮罩 -->
+      <div v-if="overlay && state.sidebarOpen" class="shell-mask" @click="state.sidebarOpen = false"></div>
 
-      <div class="tb-brand" title="回主页" @click="router.push('/')">
-        <span class="tb-logo"><Bot :size="16" /></span>
-        <b>LangGraph 工作台</b>
-      </div>
+      <!-- 列 1：会话侧栏（全路由常驻；桌面可收起为 rail；移动端为抽屉） -->
+      <aside v-if="sidebarVisible" class="sidebar" :class="{ 'as-drawer': overlay }">
+        <ConversationSidebar
+          :convs="filteredConvs()"
+          :current="state.current"
+          :collapsed="sidebarCollapsed && !overlay"
+          :show-nav="!overlay"
+          @select="onSelectConv"
+          @delete="onDelete"
+          @rename="onRename"
+          @collapse="onCollapse"
+          @expand="sidebarCollapsed = false"
+          @new-chat="onCreate"
+          @nav="onNav"
+        />
+      </aside>
 
-      <!-- 模型选择已收口到对话框内的模型选择器，顶栏不再重复放置 -->
-
-      <NInput
-        v-model:value="kw"
-        class="tb-search"
-        size="small"
-        placeholder="搜索任务、项目、资料…"
-        clearable
-      >
-        <template #prefix><NIcon :component="Search" /></template>
-      </NInput>
-
-      <div class="tb-right">
-        <span class="status" :class="{ on: state.status.includes('●') }">{{ state.status }}</span>
-        <NTooltip>
-          <template #trigger>
-            <NButton quaternary circle size="small" @click="router.push('/settings')">
-              <template #icon><Settings :size="16" /></template>
-            </NButton>
-          </template>
-          设置
-        </NTooltip>
-        <NButton
-          v-if="authState.enabled"
-          quaternary
-          size="small"
-          class="user-btn"
-          :title="`当前用户：${authState.username || '未知'}，点击退出登录`"
-          @click="onLogout"
-        >
-          <template #icon><User :size="15" /></template>
-          <span class="uname">{{ authState.username }}</span>
-          <LogOut :size="13" class="logout-glyph" />
-        </NButton>
-      </div>
-    </header>
-
-    <div class="app-body">
-      <!-- 内容区：由路由决定（导航入口：首页会话侧栏菜单 / 窄屏抽屉 / 顶栏品牌与设置） -->
+      <!-- 列 2：内容区（首页聊天 / 各功能页） -->
       <main class="content">
-        <RouterView v-slot="{ Component }">
-          <component :is="Component" :show-right="showRight" />
-        </RouterView>
+        <RouterView />
       </main>
     </div>
 
-    <!-- 窄屏抽屉导航：覆盖层 + 右侧滑入面板 -->
-    <Teleport to="body">
-      <div v-if="drawer" class="drawer-mask" @click="drawer = false"></div>
-      <aside v-if="drawer" class="drawer-panel" role="dialog" aria-label="导航菜单">
-        <div class="drawer-head">
-          <span class="drawer-brand">
-            <span class="tb-logo"><Bot :size="16" /></span>
-            <b>导航</b>
-          </span>
-          <NButton quaternary circle size="small" title="关闭" @click="drawer = false">
-            <template #icon><X :size="16" /></template>
-          </NButton>
-        </div>
-        <div class="drawer-list">
-          <div
-            v-for="n in drawerNav"
-            :key="n.key"
-            class="drawer-item"
-            :class="{ active: activeKey === n.key }"
-            @click="onNav(n.key)"
-          >
-            <component :is="n.icon" :size="18" />
-            <span>{{ n.label }}</span>
-          </div>
-        </div>
-      </aside>
-    </Teleport>
+    <!-- 移动端底部菜单：项目（当前会话）/ 专家·技能·连接器 / 自动化 / 资料库 / 灵感 -->
+    <nav class="tabbar">
+      <span
+        v-for="t in tabItems"
+        :key="t.key"
+        class="tab-item"
+        :class="{ active: activeTab === t.key }"
+        @click="onTab(t.path)"
+      >
+        <component :is="t.icon" :size="19" class="tab-ico" />
+        <span class="tab-label">{{ t.label }}</span>
+      </span>
+      <!-- 抽屉外的用户入口：设置 / 退出 -->
+      <NDropdown trigger="click" placement="top-end" :options="userOptions" @select="onNav">
+        <span class="tab-item tab-user">
+          <NAvatar round :size="22" class="tab-avatar">{{ uname.slice(0, 1).toUpperCase() }}</NAvatar>
+        </span>
+      </NDropdown>
+    </nav>
   </div>
 </template>
 
-<style scoped>
-/* 内容区在四区布局下不再额外留白，由页内 .page / .app-shell 自行控制 */
+<style scoped lang="scss">
+.app-root {
+  height: var(--app-h);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.app-body {
+  flex: 1;
+  display: grid;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
+}
+.content { min-width: 0; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
 .content > * { flex: 1; min-height: 0; }
 
-/* ---- 抽屉导航（仅窄屏使用） ---- */
-.drawer-mask {
-  position: fixed; inset: 0; z-index: 200;
-  background: rgba(31, 35, 40, .42);
-  animation: fade-mask .16s ease;
+.sidebar {
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
 }
-@keyframes fade-mask { from { opacity: 0; } to { opacity: 1; } }
+/* 移动端：侧栏变抽屉 */
+.sidebar.as-drawer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: min(84vw, 300px);
+  z-index: 30;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .14);
+}
+.shell-mask {
+  position: absolute;
+  inset: 0;
+  background: rgba(31, 35, 40, .38);
+  z-index: 25;
+  animation: fade-in .16s ease;
+}
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 
-.drawer-panel {
-  position: fixed; top: 0; bottom: 0; left: 0; z-index: 201;
-  width: min(78vw, 288px);
-  display: flex; flex-direction: column;
-  background: var(--panel); border-right: 1px solid var(--border);
-  box-shadow: 0 12px 40px rgba(0, 0, 0, .18);
-  padding-top: env(safe-area-inset-top);
-  padding-bottom: env(safe-area-inset-bottom);
-  animation: slide-mask .2s cubic-bezier(.2, .8, .25, 1);
-}
-@keyframes slide-mask {
-  from { transform: translateX(-100%); }
-  to   { transform: translateX(0); }
+/* 移动端底部菜单 */
+.tabbar {
+  display: none;
 }
 
-.drawer-head {
-  display: flex; align-items: center; justify-content: space-between;
-  gap: 8px; padding: 12px; border-bottom: 1px solid var(--border);
+@media (max-width: 767px) {
+  .app-root { height: var(--app-h); }
+  .app-body { height: calc(var(--app-h) - var(--tabbar-h)); }
+  .tabbar {
+    display: flex;
+    align-items: stretch;
+    height: calc(var(--tabbar-h) + env(safe-area-inset-bottom));
+    padding-bottom: env(safe-area-inset-bottom);
+    background: var(--panel);
+    border-top: 1px solid var(--border);
+    flex: 0 0 auto;
+  }
+  .tab-item {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    color: var(--muted);
+    font-size: 10px;
+    cursor: pointer;
+    user-select: none;
+    min-width: 0;
+    .tab-ico { flex: 0 0 auto; }
+    .tab-label {
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      padding: 0 2px;
+    }
+    &.active { color: var(--accent); }
+    &.active .tab-ico { color: var(--accent); }
+  }
+  .tab-user {
+    flex: 0 0 52px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .tab-avatar { background: var(--accent-grad); color: #fff; font-size: 12px; }
 }
-.drawer-brand { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; }
-
-.drawer-list { flex: 1; overflow-y: auto; padding: 8px; min-height: 0; }
-.drawer-item {
-  display: flex; align-items: center; gap: 10px;
-  padding: 11px 12px; border-radius: 10px; cursor: pointer;
-  color: var(--text); font-size: 14px; margin-bottom: 2px;
-}
-.drawer-item:hover { background: var(--hover); }
-.drawer-item.active { background: var(--accent-weak); color: var(--accent); font-weight: 500; }
 </style>

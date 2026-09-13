@@ -36,4 +36,29 @@ export const api = {
   },
   rawFileUrl: (cid: string, path: string) =>
     `/api/conversations/${cid}/files/raw?path=${encodeURIComponent(path)}`,
+  // 聊天附件上传：JSON+base64，避免 multipart 依赖；limit 与后端约定（前端先拦一道）
+  uploadFiles: async <T = unknown>(
+    cid: string,
+    files: { name: string; data: string }[],
+  ): Promise<T> => {
+    const r = await fetch(`/api/conversations/${cid}/files/upload`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ files }),
+    })
+    return (await r.json()) as T
+  },
+}
+
+/** 把浏览器 File 读成 base64（不含 data: 前缀）。 */
+export function fileToBase64(f: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const s = String(reader.result || '')
+      resolve(s.slice(s.indexOf(',') + 1))
+    }
+    reader.onerror = () => reject(reader.error)
+    reader.readAsDataURL(f)
+  })
 }

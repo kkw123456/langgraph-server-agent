@@ -2,8 +2,12 @@
 import { computed, ref } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
-import { NAvatar, NCollapse, NCollapseItem, NTag } from 'naive-ui'
-import { Bot, User, BrainCircuit, Wrench, Loader2 } from 'lucide-vue-next'
+import { NAvatar } from 'naive-ui'
+import {
+  Bot, BrainCircuit, Braces, Check, Code2, FileOutput, FilePlus2, FileText, FolderClosed,
+  Globe, Loader2, Table2, Terminal, UserRound, Wrench,
+} from 'lucide-vue-next'
+import type { Component } from 'vue'
 import type { Message, ToolCall } from '../types'
 import { toolLabel } from '../utils/toolLabels'
 
@@ -29,21 +33,95 @@ const thinkingNow = computed(
 )
 const thinkOpen = ref<string[]>(thinkingNow.value ? ['think'] : [])
 
-// ---- 工具调用分组：连续同名调用合并为一组 ----
-interface ToolGroup { name: string; calls: ToolCall[]; running: boolean }
-const toolGroups = computed<ToolGroup[]>(() => {
-  const out: ToolGroup[] = []
-  for (const tc of props.msg.tool_calls || []) {
-    const last = out[out.length - 1]
-    if (last && last.name === tc.name) last.calls.push(tc)
-    else out.push({ name: tc.name, calls: [tc], running: false })
+// ===================== 消息分段：按发生顺序交错展示「文本 → 工具组 → 文本」 =====================
+// 后端在每个 tool_call 上记录了 at（发生时正文已输出的长度）：
+// 相邻且 at 相同的工具合并为一组，文本按 at 切片，形成自然的时间线。
+// 旧数据没有 at：回退为「工具组在前、正文在后」。
+interface TextSeg { kind: 'text'; text: string }
+interface ToolSeg { kind: 'tools'; calls: ToolCall[]; running: boolean }
+type Seg = TextSeg | ToolSeg
+
+const segments = computed<Seg[]>(() => {
+  const calls = props.msg.tool_calls || []
+  const content = props.msg.content || ''
+  if (!calls.length) return content ? [{ kind: 'text', text: content }] : []
+
+  // 无 at 的旧数据：整体置顶
+  if (calls.some((c) => typeof c.at !== 'number')) {
+    return [{ kind: 'tools', calls: mergeAdjacent(calls), running: false }, { kind: 'text', text: content }]
   }
-  for (const g of out) g.running = g.calls.some((c) => c.output === '执行中…')
+
+  // 按 at 切分：每个工具组的文本前置段 = content[上一组结束, 本组 at)
+  const out: Seg[] = []
+  let cursor = 0
+  let group: ToolCall[] = []
+  const flushGroup = (at: number) => {
+    if (!group.length) return
+    const text = content.slice(cursor, at)
+    if (text.trim()) out.push({ kind: 'text', text })
+    out.push({ kind: 'tools', calls: group, running: false })
+    cursor = at
+    group = []
+  }
+  for (const tc of calls) {
+    const at = typeof tc.at === 'number' ? tc.at : content.length
+    if (group.length && at !== (group[0].at ?? at)) flushGroup(at)
+    group.push(tc)
+  }
+  flushGroup(content.length)
+  const tail = content.slice(cursor)
+  if (tail.trim()) out.push({ kind: 'text', text: tail })
+  for (const seg of out) {
+    if (seg.kind === 'tools') seg.running = seg.calls.some((c) => c.output === '执行中…')
+  }
   return out
 })
 
-function truncate(s: string, n = 90): string {
-  s = String(s || '')
+/** 相邻同名工具合并为一组（视觉降噪，调用明细在节点内逐条展示）。 */
+function mergeAdjacent(calls: ToolCall[]): ToolCall[] {
+  const out: ToolCall[] = []
+  for (const tc of calls) {
+    const last = out[out.length - 1]
+    if (last && last.name === tc.name) last.output = tc.output || last.output
+    else out.push({ ...tc })
+  }
+  return out
+}
+
+// ===================== 工具节点：按工具类型换图标 =====================
+const TOOL_ICONS: Record<string, Component> = {
+  run_python: Terminal,
+  run_command: Terminal,
+  write_file: FilePlus2,
+  edit_file: FilePlus2,
+  read_file: FileText,
+  list_dir: FolderClosed,
+  delete_file: FileOutput,
+  web_search: Globe,
+  fetch_url: Globe,
+  query_table: Table2,
+  run_sql: Table2,
+  call_llm: Braces,
+}
+function toolIcon(name: string): Component {
+  return TOOL_ICONS[name] || Wrench
+}
+
+// ===================== 工具节点展开态（无箭头 icon，点击卡片本身切换） =====================
+const expanded = ref<Set<string>>(new Set())
+function keyOf(segIdx: number, ti: number): string {
+  return `${segIdx}:${ti}`
+}
+function toggle(segIdx: number, ti: number): void {
+  const k = keyOf(segIdx, ti)
+  const next = new Set(expanded.value)
+  if (next.has(k)) next.delete(k)
+  else next.add(k)
+  expanded.value = next
+}
+
+function truncate(s: string, n = 110): string {
+  s = String(s || '').replace(/\s+/g, ' ').trim()
   return s.length > n ? s.slice(0, n) + '…' : s
 }
 </script>
@@ -54,10 +132,9 @@ function truncate(s: string, n = 90): string {
       class="avatar"
       :class="msg.role"
       round
-      :size="30"
-      :color="msg.role === 'user' ? '#2f6feb' : '#e8f0fe'"
+      :size="32"
     >
-      <component :is="msg.role === 'user' ? User : Bot" :size="16" :color="msg.role === 'user' ? '#fff' : '#2f6feb'" />
+      <component :is="msg.role === 'user' ? UserRound : Bot" :size="16" />
     </NAvatar>
     <div class="bubble">
       <template v-if="msg.role === 'user'">
@@ -65,45 +142,40 @@ function truncate(s: string, n = 90): string {
       </template>
       <template v-else>
         <!-- 思考过程（deepseek/ark 等模型的 reasoning_content） -->
-        <NCollapse v-if="hasThinking || thinkingNow" class="think-collapse" v-model:expanded-names="thinkOpen">
-          <NCollapseItem name="think" class="think-item">
-            <template #header>
-              <span class="think-head">
-                <BrainCircuit :size="13" />
-                <span>{{ thinkingNow ? '正在深度思考…' : '思考过程' }}</span>
-                <Loader2 v-if="thinkingNow" :size="12" class="spin" />
-              </span>
-            </template>
-            <div class="think-body">{{ msg.reasoning }}</div>
-          </NCollapseItem>
-        </NCollapse>
-
-        <!-- 工具调用：同类型合并折叠，运行中显示 loading 图标 -->
-        <div v-if="toolGroups.length" class="tool-groups">
-          <NCollapse v-for="(g, gi) in toolGroups" :key="gi" class="tool-collapse" arrow-placement="left">
-            <NCollapseItem :name="String(gi)" class="tool-item">
-              <template #header>
-                <span class="tool-head">
-                  <Wrench :size="13" class="tool-ico" />
-                  <span class="tool-name">
-                    {{ toolLabel(g.name) }}<template v-if="g.calls.length > 1"> ×{{ g.calls.length }}</template>
-                  </span>
-                  <Loader2 v-if="g.running" :size="12" class="spin" />
-                  <NTag v-else size="small" :bordered="false" type="success">完成</NTag>
-                </span>
-              </template>
-              <div v-for="(tc, ti) in g.calls" :key="ti" class="tool-call-item">
-                <div v-if="g.calls.length > 1" class="tool-call-idx muted tiny">#{{ ti + 1 }}</div>
-                <pre class="tool-body">输入: {{ truncate(tc.input) || '（无）' }}
-
-输出: {{ tc.output || '' }}</pre>
-              </div>
-            </NCollapseItem>
-          </NCollapse>
+        <div v-if="hasThinking || thinkingNow" class="think-box" :class="{ open: thinkOpen.length }" @click="thinkOpen = thinkOpen.length ? [] : ['think']">
+          <div class="think-head">
+            <BrainCircuit :size="13" />
+            <span>{{ thinkingNow ? '正在深度思考' : '思考过程' }}</span>
+            <Loader2 v-if="thinkingNow" :size="12" class="spin" />
+          </div>
+          <div v-if="thinkOpen.length" class="think-body">{{ msg.reasoning }}</div>
         </div>
 
-        <!-- 正文：markdown 渲染 -->
-        <div v-if="msg.content" class="md" v-html="html"></div>
+        <!-- 按发生顺序交错渲染：文本段 / 工具组段 -->
+        <template v-for="(seg, si) in segments" :key="si">
+          <div v-if="seg.kind === 'text'" class="md seg-text" v-html="DOMPurify.sanitize(marked.parse(seg.text, { async: false }))"></div>
+          <div v-else class="tool-nodes">
+            <div
+              v-for="(tc, ti) in seg.calls"
+              :key="ti"
+              class="tool-node"
+              :class="{ running: seg.running, open: expanded.has(keyOf(si, ti)) }"
+              @click="toggle(si, ti)"
+            >
+              <div class="tn-head">
+                <span class="tn-ico"><component :is="toolIcon(tc.name)" :size="14" /></span>
+                <span class="tn-name">{{ toolLabel(tc.name) }}</span>
+                <span class="tn-arg muted">{{ truncate(tc.input) }}</span>
+                <Loader2 v-if="seg.running" :size="13" class="spin tn-state" />
+                <Check v-else :size="13" class="tn-state tn-done" />
+              </div>
+              <pre v-if="expanded.has(keyOf(si, ti))" class="tn-body">输入: {{ tc.input || '（无）' }}
+
+输出: {{ tc.output || '' }}</pre>
+            </div>
+          </div>
+        </template>
+
         <span v-if="streaming" class="cursor"></span>
       </template>
     </div>

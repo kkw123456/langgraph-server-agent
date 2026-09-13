@@ -8,10 +8,22 @@ import {
   dateZhCN,
   lightTheme,
   useMessage,
+  type GlobalThemeOverrides,
 } from 'naive-ui'
 import App from './App.vue'
 import { router } from './router'
-import './style.css'
+import './style.scss'
+
+// 主题色 #18a058：naive-ui 组件与全局 SCSS 变量（style.scss）保持一致
+const themeOverrides: GlobalThemeOverrides = {
+  common: {
+    primaryColor: '#18a058',
+    primaryColorHover: '#36ad6a',
+    primaryColorPressed: '#0c7a43',
+    primaryColorSuppl: '#36ad6a',
+    borderRadius: '8px',
+  },
+}
 
 // 把 naive-ui 的 message 实例暴露给非组件模块（如 store.ts）使用。
 // 由于 useMessage() 必须在 provider 内部调用，这里用一个中间代理，
@@ -37,7 +49,7 @@ const Root = defineComponent({
     return () =>
       h(
         NConfigProvider,
-        { theme: lightTheme, locale: zhCN, dateLocale: dateZhCN },
+        { theme: lightTheme, themeOverrides, locale: zhCN, dateLocale: dateZhCN },
         {
           default: () =>
             h(NDialogProvider, null, {

@@ -1,5 +1,6 @@
 <script setup lang="ts">
-// 主界面（对话）：会话侧栏 + 聊天区 + 右侧结果面板。
+// 主界面（对话）：聊天区 + 右侧结果面板。
+// 会话侧栏已提升到 Shell（全路由常驻），本组件只承载中间对话与右侧面板两列。
 // 右面板：左侧竖向图标（产物/所有文件/变更预览）+ 手写多标签文件预览（file-viewer 渲染非文本）。
 // 无预览标签时功能面板常驻主体；有预览时 hover 左侧图标下拉出对应面板。
 // <flyfish-file-viewer> Web Component（非文本文件预览）按需加载：
@@ -24,26 +25,22 @@ function ensureFileViewer(): Promise<void> {
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
-  NButton, NRadioGroup, NRadioButton, NScrollbar, NEmpty, useMessage, useDialog,
+  NButton, NScrollbar, NEmpty, useMessage,
 } from 'naive-ui'
 import {
-  MessageSquare, ChevronsRight, ChevronsLeft,
-  FileText, FolderClosed, GitCompare, Maximize2, Minimize2, Download, Sparkles,
+  ChevronsRight, ChevronsLeft,
+  FileText, FolderClosed, GitCompare, Maximize2, Minimize2, Sparkles,
   X, List,
 } from 'lucide-vue-next'
 import {
-  state, loadConvs, loadSkills, selectConv, newChat, deleteConv, renameConv,
-  sendText, createSkill, setMode, filteredConvs,
+  state, loadConvs, loadSkills, selectConv, newChat,
+  sendText,
 } from '../store'
-import type { CreateSkillPayload } from '../types'
 import { toolLabel } from '../utils/toolLabels'
 import { useBreakpoint } from '../composables/useBreakpoint'
-import { logout as authLogout } from '../auth'
-import ConversationSidebar from '../components/ConversationSidebar.vue'
 import ChatWindow from '../components/ChatWindow.vue'
 import FilePanel from '../components/FilePanel.vue'
 import ToolConfirm from '../components/ToolConfirm.vue'
-import SkillModal from '../components/SkillModal.vue'
 import { api } from '../api'
 
 const props = defineProps<{ showRight?: boolean }>()
@@ -51,21 +48,14 @@ const props = defineProps<{ showRight?: boolean }>()
 const router = useRouter()
 const route = useRoute()
 const message = useMessage()
-const dialog = useDialog()
 const bp = useBreakpoint()
-const showModal = ref(false)
 
-// 右侧面板：展开 / 收起（宽度可拖拽、可全屏）
+// ---- 右侧面板：展开 / 收起（宽度可拖拽、可全屏） ----
 type PanelState = 'full' | 'collapsed'
 const panelState = ref<PanelState>('full')
 const panelWidth = ref(380)
 const resizing = ref(false)
 const fullscreen = ref(false)
-
-// 会话侧栏在窄屏变为抽屉：默认关闭，由顶栏/气泡按钮唤出
-const sidebarOpen = ref(false)
-// 桌面端「收起侧边栏」状态：收起后仅显示竖向图标 rail
-const sidebarCollapsed = ref(false)
 
 // ---- 右面板功能视图与文件预览标签 ----
 type SideView = 'artifacts' | 'files' | 'diff'
@@ -151,12 +141,11 @@ watch(() => state.current, () => {
   sideView.value = 'files'
 })
 
-// 会话栏宽度与右侧面板宽度的上下限：中屏时同步收窄，避免挤压对话区
-const sidebarWidth = computed(() => (bp.isLg ? 260 : bp.isMd ? 224 : 208))
+// 面板宽度上下限：中屏时收窄，避免挤压对话区
 const panelMin = computed(() => (bp.isMd ? 260 : 240))
 const panelMax = computed(() => (bp.isLg ? 820 : bp.isMd ? 620 : 480))
 
-// 窄屏（<1024）下三列无法并排，右侧面板与会话栏都改为覆盖层
+// 窄屏（<1024）下右面板改为覆盖层
 const overlay = computed(() => bp.overlayPanel)
 
 // 面板实际占据的宽度：收起为 0
@@ -168,33 +157,27 @@ const panelCol = computed(() => {
 
 // 把面板宽度写回 CSS 变量，供 .app-shell 的覆盖层样式与拖拽时使用
 watch(
-  [panelCol, sidebarWidth],
+  [panelCol],
   () => {
     const root = document.documentElement
     root.style.setProperty('--panel-w', `${panelCol.value || 320}px`)
-    root.style.setProperty('--sidebar-w', `${sidebarWidth.value}px`)
   },
   { immediate: true },
 )
 
+// 两列布局：对话区 + 右侧结果面板（会话侧栏由 Shell 承载）
 const gridTemplate = computed(() => {
-  // 覆盖层模式：三列塌缩为单列，两侧以绝对定位浮在内容之上
   if (overlay.value) return 'minmax(0, 1fr)'
-  // 收起态仅保留一条竖向图标 rail（宽度与 Shell 图标条一致）
-  const sw = sidebarCollapsed.value ? 56 : sidebarWidth.value
-  if (!props.showRight) return `${sw}px minmax(0, 1fr) 0px`
-  return `${sw}px minmax(0, 1fr) ${panelCol.value}px`
+  if (!props.showRight) return 'minmax(0, 1fr) 0px'
+  return `minmax(0, 1fr) ${panelCol.value}px`
 })
 
-// 会话栏桌面端常驻（收起时由 ConversationSidebar 内部切为 rail 形态）；窄屏仅在抽屉打开时渲染
-const sidebarVisible = computed(() => (overlay.value ? sidebarOpen.value : true))
 // 右侧面板在窄屏仅在「展开」态渲染，收起时不占位
 const panelVisible = computed(() =>
   overlay.value ? props.showRight && panelState.value === 'full' : !!props.showRight,
 )
 
 const streaming = computed(() => !!state.live)
-const convsFiltered = computed(() => filteredConvs())
 
 // 「产物」标签：从会话消息里收集工具调用产生的条目，作为可下载的结果卡片
 const artifacts = computed(() => {
@@ -231,91 +214,19 @@ function startResize(e: MouseEvent): void {
   window.addEventListener('mouseup', onUp)
 }
 
-// 选择会话后自动收起窄屏抽屉，让对话立刻可见
-async function onSelectConv(id: string): Promise<void> {
-  sidebarOpen.value = false
-  await selectConv(id)
-}
-
-async function onCreate(): Promise<void> {
-  sidebarOpen.value = false
-  await newChat()
-}
-
-// 侧栏顶栏的「收起侧边栏」：窄屏是关抽屉，桌面是收起整列
-function onSidebarCollapse(): void {
-  if (overlay.value) sidebarOpen.value = false
-  else sidebarCollapsed.value = true
-}
-
-async function onRenameConv(id: string, title: string): Promise<void> {
-  await renameConv(id, title)
-  message.success('已重命名')
-}
-
-// 侧栏导航 tabs / 更多菜单 / 用户菜单的统一入口
-function onNav(key: string): void {
-  if (key === 'skill-new') {
-    sidebarOpen.value = false
-    showModal.value = true
-    return
-  }
-  if (key === 'bell') {
-    message.info('暂无新消息')
-    return
-  }
-  if (key === 'logout') {
-    dialog.warning({
-      title: '退出登录',
-      content: '确定要退出当前账号吗？',
-      positiveText: '退出',
-      negativeText: '取消',
-      onPositiveClick: async () => {
-        await authLogout()
-        router.replace('/login')
-      },
-    })
-    return
-  }
-  const routes: Record<string, string> = {
-    projects: '/projects',
-    experts: '/experts',
-    automation: '/automation',
-    library: '/library',
-    inspiration: '/inspiration',
-    settings: '/settings',
-  }
-  const path = routes[key]
-  if (!path) return
-  sidebarOpen.value = false
-  if (route.path !== path) router.push(path)
-}
-
-async function onSubmit(payload: CreateSkillPayload): Promise<void> {
-  const r = await createSkill(payload)
-  if (r.ok) { showModal.value = false; message.success('技能创建成功') }
-  else message.error('创建失败: ' + (r.error || '未知错误'))
-}
-
-function onDeleteConv(id: string): void {
-  deleteConv(id).then(() => message.success('会话已删除'))
-}
-
 function downloadUrl(path: string): string {
   return state.current ? api.rawFileUrl(state.current, path) : '#'
 }
 
-// 视口变化时的状态收敛：变窄后退出全屏、关抽屉；恢复宽屏后收起浮层
+// 视口变化时的状态收敛：变窄后退出全屏、关抽屉
 watch(
   () => [bp.isMd, bp.isXs] as const,
   () => {
     if (!bp.isMd) {
       fullscreen.value = false
-      // 从宽屏切到窄屏：面板默认保持展开，会话栏默认收起
-      sidebarOpen.value = false
     } else {
-      sidebarOpen.value = false
-      // 回到三栏时，避免面板仍是 collapsed 造成「什么都没有」的错觉
+      state.sidebarOpen = false
+      // 回到宽屏，避免面板仍是 collapsed 造成「什么都没有」的错觉
       if (panelState.value === 'collapsed') panelState.value = 'full'
     }
   },
@@ -323,7 +234,7 @@ watch(
 
 function onKeydown(e: KeyboardEvent): void {
   if (e.key === 'Escape') {
-    if (sidebarOpen.value) sidebarOpen.value = false
+    if (state.sidebarOpen) state.sidebarOpen = false
     else if (fullscreen.value) fullscreen.value = false
   }
 }
@@ -356,72 +267,32 @@ onBeforeUnmount(() => {
     :class="{ resizing, 'as-overlay': overlay }"
     :style="{ gridTemplateColumns: gridTemplate }"
   >
-    <!-- 窄屏抽屉遮罩：点击或按 Esc 关闭 -->
-    <div v-if="overlay && sidebarOpen" class="shell-mask" @click="sidebarOpen = false"></div>
-
-    <!-- 列 1：会话侧栏（WorkBuddy 风格；桌面可收起为图标 rail；窄屏为抽屉） -->
-    <aside v-if="sidebarVisible" class="sidebar">
-      <ConversationSidebar
-        :convs="convsFiltered"
-        :current="state.current"
-        :collapsed="sidebarCollapsed && !overlay"
-        @select="onSelectConv"
-        @delete="onDeleteConv"
-        @rename="onRenameConv"
-        @collapse="onSidebarCollapse"
-        @expand="sidebarCollapsed = false"
-        @new-chat="onCreate"
-        @nav="onNav"
-      />
-    </aside>
-
-    <!-- 列 2：对话区 -->
+    <!-- 列 1：对话区（无 header；浮动按钮：移动端唤出抽屉 / 右面板切换） -->
     <section class="main">
-      <header class="topbar">
-        <div class="topic">
-          <!-- 窄屏：唤出会话列表抽屉；桌面：显示会话图标 -->
-          <NButton
-            v-if="overlay"
-            quaternary
-            circle
-            size="small"
-            class="topic-btn"
-            title="会话列表"
-            @click="sidebarOpen = true"
-          >
-            <template #icon><List :size="16" /></template>
-          </NButton>
-          <MessageSquare v-else :size="15" class="topic-ico" />
-          <h1>{{ state.convTitle }}</h1>
-        </div>
-        <div class="topbar-right">
-          <NRadioGroup
-            :value="state.mode"
-            size="small"
-            @update:value="(v: string) => setMode(v as 'auto' | 'confirm')"
-          >
-            <NRadioButton value="auto">
-              <!-- 窄屏只显示首字，避免单选组把标题挤没 -->
-              <span class="mode-full">自动</span><span class="mode-abbr">自动</span>
-            </NRadioButton>
-            <NRadioButton value="confirm">
-              <span class="mode-full">确认</span><span class="mode-abbr">确认</span>
-            </NRadioButton>
-          </NRadioGroup>
-          <NButton
-            v-if="showRight"
-            quaternary
-            circle
-            size="small"
-            :title="panelState === 'collapsed' ? '展开右侧面板' : '收起右侧面板'"
-            @click="togglePanel"
-          >
-            <template #icon>
-              <component :is="panelState === 'collapsed' ? ChevronsLeft : ChevronsRight" :size="16" />
-            </template>
-          </NButton>
-        </div>
-      </header>
+      <NButton
+        v-if="overlay"
+        quaternary
+        circle
+        size="small"
+        class="float-btn drawer-btn"
+        title="会话列表"
+        @click="state.sidebarOpen = true"
+      >
+        <template #icon><List :size="16" /></template>
+      </NButton>
+      <NButton
+        v-if="showRight"
+        quaternary
+        circle
+        size="small"
+        class="float-btn panel-handle"
+        :title="panelState === 'collapsed' ? '展开右侧面板' : '收起右侧面板'"
+        @click="togglePanel"
+      >
+        <template #icon>
+          <component :is="panelState === 'collapsed' ? ChevronsLeft : ChevronsRight" :size="16" />
+        </template>
+      </NButton>
 
       <ChatWindow @send="sendText" />
     </section>
@@ -552,7 +423,6 @@ onBeforeUnmount(() => {
       </div>
     </aside>
 
-    <SkillModal :open="showModal" @close="showModal = false" @submit="onSubmit" />
     <ToolConfirm v-if="state.pendingTool" :calls="state.pendingTool" />
   </div>
 </template>

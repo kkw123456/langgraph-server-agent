@@ -1,5 +1,5 @@
 import { reactive } from 'vue'
-import { api } from './api'
+import { api, fileToBase64 } from './api'
 import { message as toast } from './main'
 import type { Conversation, Message, Skill, WsEvent, CreateSkillPayload, ToolMode, PendingToolCall } from './types'
 
@@ -17,6 +17,7 @@ interface AppState {
   waiting: boolean          // 消息已发出但模型尚未开始回复（显示 loading）
   running: boolean          // 当前会话是否有正在进行的对话轮次
   filesTick: number         // 会话工作目录变化信号：创建文件类工具结束 / 会话完成时 +1，文件面板据此刷新
+  sidebarOpen: boolean      // 移动端会话栏抽屉开关（由 Shell 渲染，聊天区按钮触发）
 }
 
 // 轻量级全局 store：单一响应式 state + 动作函数。
@@ -35,6 +36,7 @@ export const state = reactive<AppState>({
   waiting: false,
   running: false,
   filesTick: 0,
+  sidebarOpen: false,
 })
 
 let ws: WebSocket | null = null
@@ -61,17 +63,37 @@ function connectWs(id: string): void {
   ws.onmessage = (ev: MessageEvent) => handleEvent(JSON.parse(ev.data) as WsEvent)
 }
 
-/** 等待 WebSocket 就绪（新建会话后立即发消息时，连接可能仍在握手中）。 */
-function waitWsOpen(timeoutMs = 3000): Promise<void> {
+/**
+ * 等待 WebSocket 就绪。新建会话后立即发消息时连接可能仍在握手中：
+ * - open：resolve(true)，消息走 WS 流式；
+ * - error/close 或超时：resolve(false)，调用方回退 REST。
+ * 超时后若连接仍在 CONNECTING 则继续等握手结果，尽量避免首条消息落入无流式的 REST 分支。
+ */
+function waitWsOpen(timeoutMs = 8000): Promise<boolean> {
   return new Promise((resolve) => {
-    if (!ws || ws.readyState === 1) return resolve()
-    const timer = setTimeout(finish, timeoutMs)
-    function finish(): void {
+    if (!ws) return resolve(false)
+    if (ws.readyState === 1) return resolve(true)
+    let done = false
+    let timer = 0
+    const finish = (ok: boolean) => {
+      if (done) return
+      done = true
       clearTimeout(timer)
-      ws?.removeEventListener('open', finish)
-      resolve()
+      ws?.removeEventListener('open', onOpen)
+      ws?.removeEventListener('close', onClose)
+      ws?.removeEventListener('error', onClose)
+      resolve(ok)
     }
-    ws.addEventListener('open', finish)
+    const onOpen = () => finish(true)
+    const onClose = () => finish(false)
+    ws.addEventListener('open', onOpen)
+    ws.addEventListener('close', onClose)
+    ws.addEventListener('error', onClose)
+    timer = window.setTimeout(() => {
+      // 超时但仍在握手中：继续等 open/close，只有彻底没戏才回退
+      if (ws && ws.readyState === 0) return
+      finish(ws?.readyState === 1)
+    }, timeoutMs)
   })
 }
 
@@ -83,10 +105,18 @@ function handleEvent(msg: WsEvent): void {
     state.pendingTool = null
     state.waiting = false
     state.running = true
+    setConvRunning(state.current, true)
     for (const ev of msg.events) applyEvent(ev)
     return
   }
   applyEvent(msg)
+}
+
+// 乐观同步会话列表项的「运行中」徽标：WS 事件驱动，不等下一次 loadConvs 轮询
+function setConvRunning(id: string | null, v: boolean): void {
+  if (!id) return
+  const c = state.convs.find((x) => x.id === id)
+  if (c) c.running = v
 }
 
 function applyEvent(msg: WsEvent): void {
@@ -95,7 +125,7 @@ function applyEvent(msg: WsEvent): void {
       state.live = { role: 'assistant', content: '', tool_calls: [] }
       state.waiting = false
       state.running = true
-      loadConvs() // 同步会话列表的「运行中」徽标
+      setConvRunning(state.current, true) // 侧栏立即转圈（结束后由 message_end 的 loadConvs 校准）
       break
     case 'token':
       if (state.live) state.live.content += msg.content
@@ -106,7 +136,7 @@ function applyEvent(msg: WsEvent): void {
       state.waiting = false
       break
     case 'tool_start':
-      if (state.live) state.live.tool_calls!.push({ name: msg.name, input: msg.input, output: '执行中…' })
+      if (state.live) state.live.tool_calls!.push({ name: msg.name, input: msg.input, output: '执行中…', at: msg.at })
       lastToolName = msg.name
       state.waiting = false
       break
@@ -139,6 +169,7 @@ function applyEvent(msg: WsEvent): void {
       }
       state.waiting = false
       state.running = false
+      setConvRunning(state.current, false)
       if (msg.stopped) toast.info('已停止，已生成的内容已保留')
       state.filesTick++ // 一轮对话结束：工作目录可能新增文件
       loadConvs()
@@ -147,6 +178,7 @@ function applyEvent(msg: WsEvent): void {
       if (state.live) state.live.content += '\n[错误] ' + msg.content
       else state.messages.push({ role: 'assistant', content: '[错误] ' + msg.content })
       state.waiting = false
+      setConvRunning(state.current, false)
       break
     case 'tool_confirm':
       // 后端在「确认模式」下暂停工具执行，等待前端决策
@@ -246,11 +278,11 @@ export async function renameConv(id: string, title: string): Promise<void> {
   if (state.current === id) state.convTitle = t
 }
 
-export async function sendText(text: string): Promise<void> {
+export async function sendText(text: string, files?: File[]): Promise<void> {
   const t = (text || '').trim()
-  if (!t) return
+  if (!t && !(files && files.length)) return
   if (!state.current) {
-    const c = await api.post<Conversation>('/api/conversations', { title: t.slice(0, 30) })
+    const c = await api.post<Conversation>('/api/conversations', { title: (t || '文件会话').slice(0, 30) })
     state.current = c.id
     localStorage.setItem('lg_last_conv', c.id)
     await loadConvs()
@@ -258,19 +290,51 @@ export async function sendText(text: string): Promise<void> {
     // 等连接握手完成再发消息：保证第一条消息也走 WS 流式（否则落 REST 兜底，无流式与事件）
     await waitWsOpen()
   }
-  state.messages.push({ role: 'user', content: t })
+  // 附件上传：进入会话工作目录，成功后把文件清单附进消息正文，让 Agent 知道去哪找
+  let body = t
+  if (files && files.length && state.current) {
+    const saved: string[] = []
+    for (const f of files) {
+      try {
+        const data = await fileToBase64(f)
+        const r = await api.uploadFiles<{ ok: boolean; saved?: { path: string; size: number }[]; error?: string }>(
+          state.current, [{ name: f.name, data }],
+        )
+        if (r.ok && r.saved?.length) {
+          saved.push(...r.saved.map((s) => `${s.path} (${fmtSize(s.size)})`))
+        } else {
+          toast.error(`${f.name} 上传失败: ${r.error || '未知错误'}`)
+        }
+      } catch {
+        toast.error(`${f.name} 读取失败`)
+      }
+    }
+    if (saved.length) {
+      state.filesTick++ // 上传完成：文件树刷新
+      body = (body ? body + '\n\n' : '') + `[已上传附件到工作目录：${saved.join('、')}，可直接读取]`
+    }
+  }
+  if (!body.trim()) return
+  state.messages.push({ role: 'user', content: body })
   if (ws && ws.readyState === 1) {
     state.waiting = true // 等待模型开始回复，聊天区显示 loading
     state.running = true
-    ws.send(JSON.stringify({ type: 'message', content: t }))
+    setConvRunning(state.current, true) // 乐观标记：侧栏会话项立即转圈
+    ws.send(JSON.stringify({ type: 'message', content: body }))
   } else {
-    await api.post(`/api/conversations/${state.current}/messages`, { content: t })
+    await api.post(`/api/conversations/${state.current}/messages`, { content: body })
     const d = await api.get<{ messages?: Message[] }>(`/api/conversations/${state.current}`)
     state.messages = d.messages ?? []
     state.waiting = false
     state.filesTick++ // REST 兜底路径无事件流，直接标记文件树刷新
     loadConvs()
   }
+}
+
+function fmtSize(n: number): string {
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+  return `${(n / 1024 / 1024).toFixed(1)} MB`
 }
 
 // ===================== 停止对话 =====================

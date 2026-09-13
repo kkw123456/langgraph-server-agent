@@ -9,6 +9,7 @@
 import os
 import json
 import time
+import base64
 import asyncio
 from contextlib import asynccontextmanager
 
@@ -662,6 +663,65 @@ def api_files_raw(cid: str, path: str = ""):
     return {"ok": False, "error": "不是文件"}
 
 
+# ===================== 文件上传（聊天附件 → 会话工作目录） =====================
+_UPLOAD_MAX_SINGLE = 15 * 1024 * 1024   # 单文件上限（解码后）
+_UPLOAD_MAX_TOTAL = 30 * 1024 * 1024    # 单次请求总上限（解码后）
+
+
+@app.post("/api/conversations/{cid}/files/upload", dependencies=[Depends(require_auth)])
+async def api_files_upload(cid: str, body: dict):
+    """把聊天附件写入会话工作目录。
+
+    请求体：{"files": [{"name": "a.pdf", "data": "<base64>", "path": "子目录/可选"}]}
+    使用 JSON+base64 而非 multipart，避免引入 python-multipart 依赖。
+    文件名取 basename 并拒绝路径穿越；重名自动追加序号。
+    """
+    if not store.get(cid):
+        return {"ok": False, "error": "会话不存在"}
+    files = body.get("files") or []
+    if not isinstance(files, list) or not files:
+        return {"ok": False, "error": "没有可上传的文件"}
+
+    root = workspace.get_workspace(cid)
+    os.makedirs(root, exist_ok=True)
+    total = 0
+    saved = []
+    for item in files:
+        name = os.path.basename(str(item.get("name") or "file")).strip()
+        if not name or name in {".", ".."}:
+            return {"ok": False, "error": "非法文件名"}
+        sub = str(item.get("path") or "").strip().strip("/")
+        if sub in {".", ".."} or ".." in sub.split("/"):
+            return {"ok": False, "error": "非法目标目录"}
+        try:
+            raw = base64.b64decode(str(item.get("data") or ""), validate=True)
+        except Exception:
+            return {"ok": False, "error": f"{name}: 不是有效的 base64 数据"}
+        total += len(raw)
+        if len(raw) > _UPLOAD_MAX_SINGLE:
+            return {"ok": False, "error": f"{name}: 超过单文件 15MB 上限"}
+        if total > _UPLOAD_MAX_TOTAL:
+            return {"ok": False, "error": "单次上传总量超过 30MB 上限"}
+
+        target_dir = os.path.join(root, sub) if sub else root
+        os.makedirs(target_dir, exist_ok=True)
+        # 重名追加序号：a.pdf → a-1.pdf → a-2.pdf
+        stem, ext = os.path.splitext(name)
+        final = name
+        i = 1
+        while os.path.exists(os.path.join(target_dir, final)):
+            final = f"{stem}-{i}{ext}"
+            i += 1
+        try:
+            with open(os.path.join(target_dir, final), "wb") as f:
+                f.write(raw)
+        except Exception as e:
+            return {"ok": False, "error": f"{name}: 写入失败 {e}"}
+        rel = f"{sub}/{final}" if sub else final
+        saved.append({"path": rel, "name": final, "size": len(raw)})
+    return {"ok": True, "saved": saved}
+
+
 # ===================== 对话（非流式回退） =====================
 @app.post("/api/conversations/{cid}/messages", dependencies=[Depends(require_auth)])
 async def api_send(cid: str, body: dict):
@@ -811,10 +871,13 @@ async def run_turn(cid: str, content: str, run: RunHandle | None):
                             "name": event.get("name", ""),
                             "input": _safe_str(event["data"].get("input")),
                             "output": "",
+                            # 记录该工具调用发生时已输出的正文长度：前端据此把
+                            # 消息切分为「文本 → 工具组 → 文本」的交错序列
+                            "at": len(assistant["content"]),
                         }
                         assistant["tool_calls"].append(tc)
                         if run:
-                            await run.emit({"type": "tool_start", "name": tc["name"], "input": tc["input"]})
+                            await run.emit({"type": "tool_start", "name": tc["name"], "input": tc["input"], "at": tc["at"]})
                     elif kind == "on_tool_end":
                         out = _safe_str(event["data"].get("output"))
                         _attach_output(assistant, out)
