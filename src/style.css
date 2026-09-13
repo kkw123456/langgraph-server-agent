@@ -14,9 +14,7 @@
   --user: #2f6feb;
   --ok: #1a7f37;
   --danger: #cf222e;
-  /* WorkBuddy 风格：左侧图标导航条 + 顶部工具栏 */
-  --rail: 56px;
-  --rail-bg: #f1f3f6;
+  /* WorkBuddy 风格：顶部工具栏 + 内容区 */
   --topbar-h: 52px;
 
   /* ---- 自适应尺寸：下列变量为布局的唯一真相来源 ---- */
@@ -25,10 +23,6 @@
   /* 左侧会话栏宽度 / 右侧结果面板宽度：由 Home.vue 在运行时覆写 */
   --sidebar-w: 260px;
   --panel-w: 360px;
-  /* 右侧面板收起后仅保留的图标条宽度 */
-  --panel-rail: 52px;
-  /* 底部 Tab 栏高度（仅手机尺寸生效） */
-  --tabbar-h: 56px;
   /* 内容最大宽度：超宽屏下避免行宽过长影响阅读 */
   --content-max: 1680px;
 }
@@ -86,8 +80,9 @@ body {
 .toolbar > * { -webkit-app-region: no-drag; }
 .tb-brand { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
 .tb-brand b { font-size: 14px; letter-spacing: .2px; }
-/* 品牌文字区宽度与左图标条对齐，让下方三栏的起点视觉上一致 */
-.tb-brand { width: calc(var(--rail) + 108px); }
+/* 品牌文字区：可点击回主页 */
+.tb-brand { width: 108px; cursor: pointer; }
+.tb-brand:hover b { color: var(--accent); }
 .tb-logo {
   width: 26px; height: 26px; border-radius: 8px; display: flex; align-items: center; justify-content: center;
   background: linear-gradient(135deg, var(--accent), #5b8def); color: #fff; flex: 0 0 auto;
@@ -106,29 +101,8 @@ body {
 /* 工具权限模式：窄屏下只留首字，节省横向空间 */
 .mode-abbr { display: none; }
 
-/* --- 外层：左图标条 + 内容区 --- */
-.app-body { display: grid; grid-template-columns: var(--rail) 1fr; min-height: 0; overflow: hidden; }
-
-/* 左侧竖向图标导航（WorkBuddy 风格） */
-.rail {
-  background: var(--rail-bg); border-right: 1px solid var(--border);
-  display: flex; flex-direction: column; align-items: center; gap: 4px;
-  padding: 10px 0; min-height: 0;
-}
-.nav-item {
-  width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center;
-  color: var(--muted); cursor: pointer; position: relative; transition: background .15s, color .15s;
-}
-.nav-item:hover { background: var(--hover); color: var(--text); }
-.nav-item.active { background: var(--accent-weak); color: var(--accent); }
-/* 悬浮时显示中文标签，省掉常驻文字占宽 */
-.nav-tip {
-  position: absolute; left: 48px; top: 50%; transform: translateY(-50%);
-  background: #24292f; color: #fff; font-size: 12px; padding: 4px 8px; border-radius: 6px;
-  white-space: nowrap; opacity: 0; pointer-events: none; transition: opacity .12s; z-index: 60;
-}
-.nav-item:hover .nav-tip { opacity: 1; }
-.rail-spacer { flex: 1; }
+/* --- 外层：内容区（原始 rail 已移除，导航入口收敛到会话侧栏菜单/抽屉/顶栏） --- */
+.app-body { display: grid; grid-template-columns: 1fr; min-height: 0; overflow: hidden; }
 
 /* --- 内容区：由路由决定是「主界面」还是「功能页」 --- */
 .content { min-width: 0; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
@@ -217,6 +191,10 @@ body {
 .cs-rail-item:hover { background: var(--hover); color: var(--text); }
 .cs-rail-primary { color: var(--accent); }
 .cs-rail-primary:hover { color: var(--accent); }
+/* rail 底部撑开：用户 icon 落底 */
+.cs-rail-spacer { flex: 1; }
+.cs-rail-user .cs-avatar { box-shadow: 0 1px 4px rgba(0, 0, 0, .12); }
+
 /* rail tooltip：hover 显示在图标右侧 */
 .cs-tip {
   position: absolute; left: calc(100% + 10px); top: 50%; transform: translateY(-50%);
@@ -517,59 +495,104 @@ body {
   from { transform: translateX(12px); opacity: .4; }
   to   { transform: translateX(0); opacity: 1; }
 }
-.rail-icons { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 12px 0; }
 .resize-handle {
   position: absolute; top: 0; bottom: 0; left: -4px; width: 8px; cursor: col-resize; z-index: 10;
 }
 .resize-handle:hover { background: var(--accent); opacity: .3; }
-.panel-tabs { display: flex; align-items: center; border-bottom: 1px solid var(--border); height: 44px; padding-right: 8px; flex: 0 0 auto; min-width: 0; }
-.rp-tabs { flex: 1; min-width: 0; overflow: hidden; }
-/* 标签页共 4 个，窄面板下需要允许横向滚动，否则会把容器撑破。
-   注意：Naive UI 的滚动层自带 min-width:100%，必须显式覆盖为 auto，
-   否则它会被内容撑到内容宽度，overflow-x:auto 形同虚设。 */
-.rp-tabs .n-tabs-nav-scroll-content {
-  overflow-x: auto; scrollbar-width: none; -ms-overflow-style: none;
-  min-width: 0 !important;
-  /* 该层被 Naive UI 设为 flex 且 flex:none，会按内容宽度撑开父级，
-     必须允许收缩，内部的滚动条才会真正生效 */
-  flex: 1 1 auto !important;
-  max-width: 100%;
+
+/* ---- 面板头部：功能图标（hover 下拉）+ 手写预览 tabs + 操作按钮 ---- */
+.panel-head {
+  display: flex; align-items: center; gap: 6px;
+  border-bottom: 1px solid var(--border); height: 40px;
+  padding: 0 8px; flex: 0 0 auto; min-width: 0;
 }
-.rp-tabs .n-tabs-nav-scroll-content::-webkit-scrollbar { display: none; }
-/* 逐层解除 min-width:auto 的收缩限制：nav → 滚动包装层 → 标签行，
-   否则 flex 子项仍会按内容宽度撑开，滚动条永远不会出现 */
-.rp-tabs .n-tabs-nav { min-width: 0; }
-.rp-tabs .n-tabs-wrapper { min-width: 0; }
-.rp-tabs .n-tabs-tab { flex: 0 0 auto; }
-.rp-tabs .n-tabs-nav { height: 43px; }
-.rp-actions { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; }
-.rot { transform: rotate(180deg); }
-/* 面板标签文字：宽度不足时由 .tab-label 的文本截断兜底 */
+.ph-host { position: relative; display: flex; flex: 0 0 auto; }
+.ph-ico {
+  width: 30px; height: 30px; border-radius: 8px; border: none; background: transparent;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--muted); cursor: pointer; transition: background .15s, color .15s;
+}
+.ph-ico:hover { background: var(--hover); color: var(--text); }
+/* hover 下拉出的功能面板（有预览标签时从头部弹出） */
+.ph-fly {
+  position: absolute; top: calc(100% + 6px); left: 0;
+  width: 340px; height: min(62vh, 520px);
+  background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, .16);
+  display: none; flex-direction: column; overflow: hidden; z-index: 60;
+}
+.ph-host:hover .ph-fly, .ph-host:focus-within .ph-fly { display: flex; }
+/* 透明桥：图标与浮层之间的间隙不丢 hover */
+.ph-host::after {
+  content: ''; position: absolute; top: 100%; left: -8px;
+  height: 8px; width: calc(100% + 16px); display: none;
+}
+.ph-host:hover::after { display: block; }
+.ph-fly-body { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.ph-fly-list { overflow-y: auto; min-height: 0; }
+
+/* ---- 手写文件预览 tabs ---- */
+.pv-tabs { display: flex; align-items: center; gap: 4px; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.pv-tabs::-webkit-scrollbar { display: none; }
+.pv-tab {
+  display: inline-flex; align-items: center; gap: 5px; max-width: 180px;
+  padding: 5px 8px; border-radius: 8px; font-size: 12px; cursor: pointer;
+  color: var(--muted); background: transparent; white-space: nowrap; flex: 0 0 auto;
+  user-select: none;
+}
+.pv-tab:hover { background: var(--hover); color: var(--text); }
+.pv-tab.active { background: var(--accent-weak); color: var(--accent); }
+.pv-tab-name { overflow: hidden; text-overflow: ellipsis; max-width: 128px; }
+.pv-tab-x { border-radius: 4px; flex: 0 0 auto; opacity: .6; }
+.pv-tab-x:hover { opacity: 1; background: rgba(0, 0, 0, .08); }
+.rp-actions { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; margin-left: auto; }
+
+/* ---- 面板主体：左侧功能图标条 + 内容 ---- */
+.rp-wrap { flex: 1; display: flex; min-height: 0; min-width: 0; }
+.rp-side {
+  flex: 0 0 44px; display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: 10px 0; border-right: 1px solid var(--border);
+}
+.rp-side-ico {
+  width: 32px; height: 32px; border-radius: 9px; border: none; background: transparent;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--muted); cursor: pointer; transition: background .15s, color .15s;
+}
+.rp-side-ico:hover { background: var(--hover); color: var(--text); }
+.rp-side-ico.active { background: var(--accent-weak); color: var(--accent); }
+.rp-content { flex: 1; display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+
+/* 文件预览区 */
+.pv-scroll { flex: 1; min-height: 0; }
+.pv-viewer { flex: 1; min-height: 0; display: flex; }
+.pv-viewer flyfish-file-viewer { width: 100%; height: 100%; display: block; }
+
+/* 面板标签文字：宽度不足时由 .tab-label 的文本截断兜底（Experts 等页仍使用） */
 .tab-label { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
 
-/* 文件面板 */
+/* 文件面板（树形层级展示） */
 .file-panel { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 .file-toolbar { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--border); }
 .file-path { flex: 1; display: inline-flex; align-items: center; gap: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: "SF Mono", Consolas, monospace; font-size: 12px; color: var(--muted); }
 .file-hint { padding: 12px 16px; line-height: 1.6; font-size: 13px; }
+.file-hint a { color: var(--accent); }
 .file-list-scroll { flex: 1; min-height: 0; }
-.file-scroll { flex: 1; min-height: 0; }
-.file-list { padding: 6px 8px; list-style: none; }
-.file-item { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 8px; cursor: pointer; font-size: 13px; }
+.file-tree { padding: 6px 8px; list-style: none; }
+.file-item { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 8px; cursor: pointer; font-size: 13px; }
 .file-item:hover { background: var(--hover); }
-.fi-icon { width: 18px; display: inline-flex; color: var(--muted); }
-.file-item.dir .fi-icon { color: var(--accent); }
-.fi-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fi-meta { font-size: 11px; min-width: 62px; text-align: right; }
-.file-view { flex: 1; display: flex; flex-direction: column; min-height: 0; }
-.file-view-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border); }
-.file-name { flex: 1; display: inline-flex; align-items: center; gap: 6px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fi-arrow { width: 14px; display: inline-flex; color: var(--muted); flex: 0 0 auto; }
+.fi-icon { width: 18px; display: inline-flex; color: var(--muted); flex: 0 0 auto; }
+.file-item.dir .fi-icon, .file-item.dir .fi-arrow { color: var(--accent); }
+.file-item.dir.open .fi-icon { color: var(--accent); }
+.fi-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.fi-meta { font-size: 11px; min-width: 56px; text-align: right; flex: 0 0 auto; }
+.fi-time { min-width: 72px; }
+.fi-dl { opacity: 0; flex: 0 0 auto; }
+.file-item:hover .fi-dl { opacity: 1; }
 .file-content { margin: 0; padding: 14px; font-family: "SF Mono", Consolas, monospace; font-size: 12.5px; line-height: 1.55; white-space: pre-wrap; word-break: break-word; background: #fbfcfd; }
 
-/* 预览 / 产物 / 变更 面板 */
-.preview-pane, .artifact-pane, .diff-pane { flex: 1; display: flex; flex-direction: column; min-height: 0; }
-.preview-scroll { flex: 1; min-height: 0; }
-.preview-empty { flex: 1; display: flex; align-items: center; justify-content: center; }
+/* 产物面板 */
+.artifact-pane { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow-y: auto; }
 .artifact-list { padding: 10px; display: flex; flex-direction: column; gap: 8px; }
 .artifact-card {
   display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px;
@@ -708,7 +731,7 @@ body {
      1280px  完整三栏
      1024px  三栏但会话栏收窄，右面板默认压到下限
       900px  顶栏精简（品牌文字、状态文字收起）
-      767px  结构切换：左侧图标条 → 底部 Tab 栏；会话栏/右面板 → 抽屉/浮层
+      767px  结构切换：会话栏/右面板 → 抽屉/浮层；顶栏汉堡唤出抽屉
       560px  卡片单列、输入区次要按钮隐藏
    ============================================================ */
 
@@ -738,27 +761,10 @@ body {
   .tb-search { max-width: none; }
 }
 
-/* 结构切换：单栏 + 抽屉导航 + 底部 Tab 栏 */
+/* 结构切换：单栏 + 抽屉导航（原始底部 Tab 栏已随 rail 移除） */
 @media (max-width: 767px) {
-  :root { --rail: 0px; --topbar-h: 48px; }
+  :root { --topbar-h: 48px; }
 
-  /* 左侧图标条移到屏幕底部，改为横向 Tab 栏 */
-  .app-body { grid-template-columns: minmax(0, 1fr); }
-  .rail {
-    position: fixed; left: 0; right: 0; bottom: 0; z-index: 50;
-    flex-direction: row; justify-content: space-around; align-items: center;
-    gap: 0; padding: 0 4px;
-    height: calc(var(--tabbar-h) + env(safe-area-inset-bottom));
-    padding-bottom: env(safe-area-inset-bottom);
-    border-right: none; border-top: 1px solid var(--border);
-    background: var(--panel);
-  }
-  .nav-item { width: 48px; height: 44px; }
-  .rail-spacer { display: none; }
-  /* 悬浮提示在触摸设备上没有意义，且会超出屏幕 */
-  .nav-tip { display: none; }
-  /* 底部 Tab 栏出现后，内容区需要留出等高空间，否则最后一行被遮挡 */
-  .content { padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom)); }
   .composer { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
 
   /* 顶栏控件按优先级取舍：搜索框先收，汉堡按钮出现 */
@@ -809,11 +815,8 @@ body {
   .page-title .count { display: none; }
 }
 
-/* 极窄屏（如折叠屏外屏 / 小窗口）：右面板 tab 只留图标，
-   否则第 4 个 tab 会伸到面板操作按钮之下并被截断 */
+/* 极窄屏（如折叠屏外屏 / 小窗口） */
 @media (max-width: 480px) {
-  .tab-label .tab-text { display: none; }
-  .tab-label { gap: 0; }
   .cs-run { display: none; } /* 会话行宽度有限，运行态让位于标题 */
 }
 
@@ -828,6 +831,6 @@ body {
 
 /* 打印：隐藏导航与面板，只保留内容 */
 @media print {
-  .toolbar, .rail, .sidebar, .right, .composer, .page-actions { display: none !important; }
+  .toolbar, .sidebar, .right, .composer, .page-actions { display: none !important; }
   .app-root, .app-body, .app-shell { display: block; height: auto; overflow: visible; }
 }

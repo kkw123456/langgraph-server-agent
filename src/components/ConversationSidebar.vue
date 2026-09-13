@@ -197,6 +197,15 @@ function onUser(key: string | number): void {
         </div>
       </div>
     </div>
+
+    <!-- 底部用户 icon：hover 弹出用户菜单 -->
+    <div class="cs-rail-spacer"></div>
+    <NDropdown trigger="hover" placement="right-end" :options="userOptions" @select="onUser">
+      <span class="cs-rail-item cs-rail-user">
+        <NAvatar round :size="28" class="cs-avatar">{{ uname.slice(0, 1).toUpperCase() }}</NAvatar>
+        <span class="cs-tip">{{ uname }}</span>
+      </span>
+    </NDropdown>
   </div>
 
   <!-- ============ 展开态：完整侧栏 ============ -->

@@ -1,19 +1,18 @@
 <script setup lang="ts">
-// 应用外壳：仿 WorkBuddy 的「顶部工具栏 + 左侧竖向图标导航 + 内容区」。
+// 应用外壳：顶部工具栏 + 内容区。
+// 导航入口：首页会话侧栏菜单（桌面）、窄屏汉堡抽屉、顶栏品牌（回主页）与设置按钮。
 //
-// 内容区由 vue-router 承载，图标导航即路由入口，因此每个入口都是真页面，
-// 而不是仅做样式的占位。右侧结果面板只在对话页出现，其余页面独占内容区。
+// 内容区由 vue-router 承载，因此每个入口都是真页面，而不是仅做样式的占位。
+// 右侧结果面板只在对话页出现，其余页面独占内容区。
 //
-// 自适应策略（断点见 composables/useBreakpoint.ts）：
-//   ≥768px  左侧竖向图标条常驻，悬浮显示中文标签
-//   <768px  图标条变为底部 Tab 栏，顶栏出现汉堡按钮唤出抽屉导航
-// 顶栏内的搜索框、模型选择器、状态文字、用户名按可用宽度逐级收起。
+// 自适应策略：窄屏顶栏出现汉堡按钮唤出抽屉导航；
+// 顶栏内的搜索框、状态文字、用户名按可用宽度逐级收起。
 import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NButton, NInput, NIcon, NTooltip, useMessage, useDialog } from 'naive-ui'
 import {
   Bot, Plus, Sparkles, Users, FolderClosed, Puzzle, Clock, MoreHorizontal,
-  BookMarked, Lightbulb, Search, LogOut, User, Plug, Settings, Menu, X,
+  BookMarked, Lightbulb, Search, LogOut, User, Settings, Menu, X,
 } from 'lucide-vue-next'
 import { state, newChat } from '../store'
 import { loadRuntime } from '../workbench'
@@ -143,7 +142,7 @@ onBeforeUnmount(() => {
         <template #icon><Menu :size="17" /></template>
       </NButton>
 
-      <div class="tb-brand">
+      <div class="tb-brand" title="回主页" @click="router.push('/')">
         <span class="tb-logo"><Bot :size="16" /></span>
         <b>LangGraph 工作台</b>
       </div>
@@ -186,38 +185,7 @@ onBeforeUnmount(() => {
     </header>
 
     <div class="app-body">
-      <!-- 左侧竖向图标导航（<768px 时由 CSS 转为底部 Tab 栏） -->
-      <nav class="rail">
-        <div
-          v-for="n in navMain"
-          :key="n.key"
-          class="nav-item"
-          :class="{ active: activeKey === n.key }"
-          @click="onNav(n.key)"
-        >
-          <component :is="n.icon" :size="19" />
-          <span class="nav-tip">{{ n.label }}</span>
-        </div>
-
-        <div class="rail-spacer"></div>
-
-        <div
-          v-for="n in navBottom"
-          :key="n.key"
-          class="nav-item"
-          :class="{ active: activeKey === n.key }"
-          @click="onNav(n.key)"
-        >
-          <component :is="n.icon" :size="19" />
-          <span class="nav-tip">{{ n.label }}</span>
-        </div>
-        <div class="nav-item" :title="'连接器'" @click="onNav('experts')">
-          <Plug :size="19" />
-          <span class="nav-tip">连接器</span>
-        </div>
-      </nav>
-
-      <!-- 内容区：由路由决定 -->
+      <!-- 内容区：由路由决定（导航入口：首页会话侧栏菜单 / 窄屏抽屉 / 顶栏品牌与设置） -->
       <main class="content">
         <RouterView v-slot="{ Component }">
           <component :is="Component" :show-right="showRight" />

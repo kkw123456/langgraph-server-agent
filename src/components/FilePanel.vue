@@ -1,22 +1,37 @@
 <script setup lang="ts">
+// 会话工作目录文件面板：树形层级展示（目录点击展开/收起，子层惰性加载），
+// 点击文件通过 open 事件交由右侧面板打开预览标签页。
+// store.filesTick 变化（创建文件类工具结束 / 会话完成）时自动重建并保留展开状态。
 import { ref, watch, computed } from 'vue'
 import { NButton, NEmpty, NScrollbar, NAlert } from 'naive-ui'
-import { ArrowUp, RotateCw, Download, FileText, FolderClosed, Package, ArrowLeft } from 'lucide-vue-next'
+import {
+  RotateCw, Download, FileText, FolderClosed, FolderOpen, Package,
+  ChevronRight, ChevronDown,
+} from 'lucide-vue-next'
 import { state } from '../store'
-import type { FileEntry, FileResponse, FileContentResponse } from '../types'
+import type { FileEntry, FileResponse } from '../types'
 import { api } from '../api'
 
-const emit = defineEmits<{ preview: [] }>()
+const emit = defineEmits<{ open: [path: string] }>()
 
-const curPath = ref('')
-const entries = ref<FileEntry[]>([])
-const loading = ref(false)
-const error = ref('')
-const selected = ref<FileContentResponse | null>(null)
+interface TreeNode {
+  name: string
+  path: string
+  type: 'file' | 'dir'
+  size: number
+  mtime: number
+  is_text: boolean
+  children: TreeNode[] | null
+  expanded: boolean
+  loaded: boolean
+}
 
 const cid = computed(() => state.current)
-// 供右侧「预览」标签读取当前选中的文件
-defineExpose({ selected })
+const tree = ref<TreeNode[]>([])
+const loading = ref(false)
+const error = ref('')
+// 记录展开过的目录，刷新后按路径恢复
+const expandedPaths = new Set<string>()
 
 function joinPath(base: string, name: string): string {
   return base ? `${base}/${name}` : name
@@ -31,80 +46,110 @@ function fmtSize(n: number): string {
 function fmtTime(t: number): string {
   const d = new Date(t * 1000)
   const p = (x: number) => String(x).padStart(2, '0')
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
 }
 
-async function load(path = ''): Promise<void> {
-  if (!cid.value) { error.value = '请先选择会话'; entries.value = []; return }
-  loading.value = true; error.value = ''; selected.value = null
+function toNodes(path: string, entries: FileEntry[]): TreeNode[] {
+  return entries.map((e) => ({
+    name: e.name,
+    path: joinPath(path, e.name),
+    type: e.type,
+    size: e.size,
+    mtime: e.mtime,
+    is_text: e.is_text,
+    children: null,
+    expanded: false,
+    loaded: false,
+  }))
+}
+
+async function listDir(path: string): Promise<TreeNode[]> {
+  const d = await api.files<FileResponse>(cid.value ?? '', path)
+  if (!d.ok || d.type !== 'dir') throw new Error(d.error || '加载失败')
+  return toNodes(path, d.entries)
+}
+
+async function rebuild(): Promise<void> {
+  if (!cid.value) { tree.value = []; error.value = ''; return }
+  loading.value = true
+  error.value = ''
   try {
-    const d = await api.files<FileResponse>(cid.value, path)
-    if (!d.ok) { error.value = d.error || '加载失败'; entries.value = []; return }
-    if (d.type === 'dir') {
-      curPath.value = d.path
-      entries.value = d.entries
-    } else {
-      selected.value = d
+    tree.value = await listDir('')
+    // 递归恢复已展开目录的内容
+    const restore = async (nodes: TreeNode[]): Promise<void> => {
+      for (const n of nodes) {
+        if (n.type === 'dir' && expandedPaths.has(n.path)) {
+          n.expanded = true
+          n.loaded = true
+          n.children = await listDir(n.path)
+          await restore(n.children)
+        }
+      }
     }
+    await restore(tree.value)
   } catch (e) {
     error.value = String(e)
+    tree.value = []
   } finally {
     loading.value = false
   }
 }
 
-async function openEntry(e: FileEntry): Promise<void> {
-  const p = joinPath(curPath.value, e.name)
-  if (e.type === 'dir') {
-    await load(p)
+async function toggleNode(n: TreeNode): Promise<void> {
+  if (n.type !== 'dir') return
+  n.expanded = !n.expanded
+  if (n.expanded) {
+    expandedPaths.add(n.path)
+    if (!n.loaded) {
+      try {
+        n.children = await listDir(n.path)
+        n.loaded = true
+      } catch (e) {
+        n.expanded = false
+        expandedPaths.delete(n.path)
+      }
+    }
   } else {
-    await openFile(p)
-    emit('preview')
+    expandedPaths.delete(n.path)
   }
 }
 
-async function openFile(path: string): Promise<void> {
-  if (!cid.value) return
-  loading.value = true; error.value = ''
-  try {
-    const d = await api.files<FileContentResponse>(cid.value, path)
-    if (!d.ok) { error.value = d.error || '打开失败'; return }
-    selected.value = d
-  } catch (e) {
-    error.value = String(e)
-  } finally {
-    loading.value = false
-  }
+function onClick(n: TreeNode): void {
+  if (n.type === 'dir') toggleNode(n)
+  else emit('open', n.path)
 }
-
-function goUp(): void {
-  const parts = curPath.value.split('/').filter(Boolean)
-  parts.pop()
-  load(parts.join('/'))
-}
-
-function refresh(): void { load(curPath.value) }
-function closeView(): void { selected.value = null; load(curPath.value) }
 
 function downloadUrl(path: string): string {
   return cid.value ? api.rawFileUrl(cid.value, path) : '#'
 }
 
-// 当前会话变化时自动加载其隔离工作目录
-watch(cid, () => { curPath.value = ''; selected.value = null; load('') }, { immediate: true })
+// 扁平化渲染树（缩进深度）
+const flatTree = computed(() => {
+  const out: { node: TreeNode; depth: number }[] = []
+  const walk = (nodes: TreeNode[], depth: number) => {
+    for (const n of nodes) {
+      out.push({ node: n, depth })
+      if (n.type === 'dir' && n.expanded && n.children) walk(n.children, depth + 1)
+    }
+  }
+  walk(tree.value, 0)
+  return out
+})
+
+// 会话切换：清空展开状态重载
+watch(cid, () => { expandedPaths.clear(); rebuild() }, { immediate: true })
+// 工具创建文件 / 会话完成：刷新文件树（保留展开状态）
+watch(() => state.filesTick, () => { rebuild() })
 </script>
 
 <template>
   <div class="file-panel">
     <div class="file-toolbar">
-      <NButton quaternary circle size="small" title="返回上级" :disabled="!curPath" @click="goUp">
-        <template #icon><ArrowUp :size="15" /></template>
-      </NButton>
       <span class="file-path">
-        <FolderClosed :size="14" /> {{ curPath || '/' }}
-        <span v-if="loading" class="muted">…</span>
+        <FolderClosed :size="14" /> 会话工作目录
+        <span v-if="loading" class="muted">加载中…</span>
       </span>
-      <NButton quaternary circle size="small" title="刷新" @click="refresh">
+      <NButton quaternary circle size="small" title="刷新文件列表" @click="rebuild">
         <template #icon><RotateCw :size="15" /></template>
       </NButton>
     </div>
@@ -114,38 +159,47 @@ watch(cid, () => { curPath.value = ''; selected.value = null; load('') }, { imme
     </NAlert>
     <NAlert v-else-if="error" type="error" :bordered="false" class="file-hint">{{ error }}</NAlert>
 
-    <!-- 文件内容预览（内联） -->
-    <div v-else-if="selected" class="file-view">
-      <div class="file-view-head">
-        <span class="file-name"><FileText :size="14" /> {{ selected.name }}</span>
-        <span class="muted">{{ fmtSize(selected.size) }}</span>
-        <NButton quaternary circle size="tiny" tag="a" :href="downloadUrl(selected.path)" target="_blank" title="下载">
-          <template #icon><Download :size="14" /></template>
-        </NButton>
-        <NButton quaternary circle size="tiny" title="返回列表" @click="closeView">
-          <template #icon><ArrowLeft :size="14" /></template>
-        </NButton>
-      </div>
-      <div v-if="selected.binary" class="file-hint muted">{{ selected.note || '二进制文件，无法直接预览，请下载。' }}</div>
-      <div v-else-if="selected.truncated" class="file-hint muted">{{ selected.note || '文件过大，仅显示部分内容。' }}</div>
-      <NScrollbar v-else class="file-scroll">
-        <pre class="file-content">{{ selected.content }}</pre>
-      </NScrollbar>
-    </div>
-
-    <!-- 目录列表 -->
     <NScrollbar v-else class="file-list-scroll">
-      <ul class="file-list">
-        <li v-for="e in entries" :key="e.name" class="file-item" :class="e.type" @click="openEntry(e)">
-          <span class="fi-icon">
-            <component :is="e.type === 'dir' ? FolderClosed : (e.is_text ? FileText : Package)" :size="15" />
+      <ul class="file-tree">
+        <li
+          v-for="f in flatTree"
+          :key="f.node.path"
+          class="file-item"
+          :class="[f.node.type, { open: f.node.type === 'dir' && f.node.expanded }]"
+          :style="{ paddingLeft: 8 + f.depth * 16 + 'px' }"
+          :title="f.node.type === 'dir' ? '点击展开/收起' : '点击预览'"
+          @click="onClick(f.node)"
+        >
+          <span class="fi-arrow">
+            <ChevronDown v-if="f.node.type === 'dir' && f.node.expanded" :size="13" />
+            <ChevronRight v-else-if="f.node.type === 'dir'" :size="13" />
           </span>
-          <span class="fi-name">{{ e.name }}</span>
-          <span class="fi-meta muted">{{ e.type === 'dir' ? '' : fmtSize(e.size) }}</span>
-          <span class="fi-meta muted">{{ fmtTime(e.mtime) }}</span>
+          <span class="fi-icon">
+            <FolderOpen v-if="f.node.type === 'dir' && f.node.expanded" :size="15" />
+            <FolderClosed v-else-if="f.node.type === 'dir'" :size="15" />
+            <FileText v-else-if="f.node.is_text" :size="15" />
+            <Package v-else :size="15" />
+          </span>
+          <span class="fi-name">{{ f.node.name }}</span>
+          <span class="fi-meta muted">{{ f.node.type === 'dir' ? '' : fmtSize(f.node.size) }}</span>
+          <span class="fi-meta fi-time muted">{{ fmtTime(f.node.mtime) }}</span>
+          <NButton
+            v-if="f.node.type === 'file'"
+            class="fi-dl"
+            quaternary
+            circle
+            size="tiny"
+            tag="a"
+            :href="downloadUrl(f.node.path)"
+            target="_blank"
+            title="下载"
+            @click.stop
+          >
+            <template #icon><Download :size="13" /></template>
+          </NButton>
         </li>
       </ul>
-      <NEmpty v-if="!entries.length" class="file-hint" size="small" description="空目录" />
+      <NEmpty v-if="!flatTree.length && !loading" class="file-hint" size="small" description="工作目录为空，对话产生的文件会出现在这里" />
     </NScrollbar>
   </div>
 </template>

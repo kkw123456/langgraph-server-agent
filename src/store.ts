@@ -16,6 +16,7 @@ interface AppState {
   searchKw: string          // 顶部工具栏的任务搜索关键字
   waiting: boolean          // 消息已发出但模型尚未开始回复（显示 loading）
   running: boolean          // 当前会话是否有正在进行的对话轮次
+  filesTick: number         // 会话工作目录变化信号：创建文件类工具结束 / 会话完成时 +1，文件面板据此刷新
 }
 
 // 轻量级全局 store：单一响应式 state + 动作函数。
@@ -33,9 +34,14 @@ export const state = reactive<AppState>({
   searchKw: '',
   waiting: false,
   running: false,
+  filesTick: 0,
 })
 
 let ws: WebSocket | null = null
+
+// 会产生文件变动的内置工具：结束时刷新文件列表
+const FILE_TOOLS = new Set(['write_file', 'make_dir', 'delete_file', 'run_python'])
+let lastToolName = ''
 
 export function closeWs(): void {
   if (ws) { try { ws.close() } catch (e) {} ws = null }
@@ -53,6 +59,20 @@ function connectWs(id: string): void {
   }
   ws.onclose = () => { state.status = '○ 已断开' }
   ws.onmessage = (ev: MessageEvent) => handleEvent(JSON.parse(ev.data) as WsEvent)
+}
+
+/** 等待 WebSocket 就绪（新建会话后立即发消息时，连接可能仍在握手中）。 */
+function waitWsOpen(timeoutMs = 3000): Promise<void> {
+  return new Promise((resolve) => {
+    if (!ws || ws.readyState === 1) return resolve()
+    const timer = setTimeout(finish, timeoutMs)
+    function finish(): void {
+      clearTimeout(timer)
+      ws?.removeEventListener('open', finish)
+      resolve()
+    }
+    ws.addEventListener('open', finish)
+  })
 }
 
 function handleEvent(msg: WsEvent): void {
@@ -87,6 +107,7 @@ function applyEvent(msg: WsEvent): void {
       break
     case 'tool_start':
       if (state.live) state.live.tool_calls!.push({ name: msg.name, input: msg.input, output: '执行中…' })
+      lastToolName = msg.name
       state.waiting = false
       break
     case 'tool_end':
@@ -94,6 +115,8 @@ function applyEvent(msg: WsEvent): void {
         const last = state.live.tool_calls![state.live.tool_calls!.length - 1]
         last.output = msg.output
       }
+      // 创建文件类工具结束：文件树可能变化
+      if (FILE_TOOLS.has(lastToolName)) state.filesTick++
       break
     case 'message_end':
       if (state.live) {
@@ -117,6 +140,7 @@ function applyEvent(msg: WsEvent): void {
       state.waiting = false
       state.running = false
       if (msg.stopped) toast.info('已停止，已生成的内容已保留')
+      state.filesTick++ // 一轮对话结束：工作目录可能新增文件
       loadConvs()
       break
     case 'error':
@@ -231,6 +255,8 @@ export async function sendText(text: string): Promise<void> {
     localStorage.setItem('lg_last_conv', c.id)
     await loadConvs()
     connectWs(c.id)
+    // 等连接握手完成再发消息：保证第一条消息也走 WS 流式（否则落 REST 兜底，无流式与事件）
+    await waitWsOpen()
   }
   state.messages.push({ role: 'user', content: t })
   if (ws && ws.readyState === 1) {
@@ -242,6 +268,7 @@ export async function sendText(text: string): Promise<void> {
     const d = await api.get<{ messages?: Message[] }>(`/api/conversations/${state.current}`)
     state.messages = d.messages ?? []
     state.waiting = false
+    state.filesTick++ // REST 兜底路径无事件流，直接标记文件树刷新
     loadConvs()
   }
 }

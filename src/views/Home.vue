@@ -1,15 +1,35 @@
 <script setup lang="ts">
-// 主界面（对话）：会话列表 + 聊天区 + 右侧结果面板。
-// 仿 WorkBuddy：右侧面板支持 展开 / 仅图标 / 收起 三态，可拖拽调宽、可全屏。
+// 主界面（对话）：会话侧栏 + 聊天区 + 右侧结果面板。
+// 右面板：左侧竖向图标（产物/所有文件/变更预览）+ 手写多标签文件预览（file-viewer 渲染非文本）。
+// 无预览标签时功能面板常驻主体；有预览时 hover 左侧图标下拉出对应面板。
+// <flyfish-file-viewer> Web Component（非文本文件预览）按需加载：
+// web-full 静态依赖 preset-all（全部渲染器），若在模块顶层静态 import，
+// 渲染器 chunk 会全部进入构建产物预加载，弱网下首屏直接超时。
+// 因此首次真正需要预览二进制文件时才动态加载，并显式指定运行时资产目录
+// （vite-plugin 以 copyAssets 拷贝到 /static/file-viewer/，inject 已关闭）。
+let fvReady: Promise<void> | null = null
+function ensureFileViewer(): Promise<void> {
+  if (!fvReady) {
+    fvReady = Promise.all([
+      import('@file-viewer/web-full'),
+      import('@file-viewer/core/assets'),
+    ]).then(([full, assets]) => {
+      assets.setDefaultFileViewerAssetBaseUrl('/static/file-viewer/')
+      full.setDefaultFullAssetBaseUrl('/static/file-viewer/')
+      full.defineFileViewerElement()
+    })
+  }
+  return fvReady
+}
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
-  NButton, NRadioGroup, NRadioButton, NTabs, NTabPane, NScrollbar, NEmpty, useMessage, useDialog,
+  NButton, NRadioGroup, NRadioButton, NScrollbar, NEmpty, useMessage, useDialog,
 } from 'naive-ui'
 import {
-  MessageSquare, ChevronsRight, ChevronsLeft, PanelRightOpen,
+  MessageSquare, ChevronsRight, ChevronsLeft,
   FileText, FolderClosed, GitCompare, Maximize2, Minimize2, Download, Sparkles,
-  PanelRight, X, List,
+  X, List,
 } from 'lucide-vue-next'
 import {
   state, loadConvs, loadSkills, selectConv, newChat, deleteConv, renameConv,
@@ -35,18 +55,101 @@ const dialog = useDialog()
 const bp = useBreakpoint()
 const showModal = ref(false)
 
-// 右侧面板三态：完全收起 / 只留图标 / 展开
-type PanelState = 'full' | 'icons' | 'collapsed'
+// 右侧面板：展开 / 收起（宽度可拖拽、可全屏）
+type PanelState = 'full' | 'collapsed'
 const panelState = ref<PanelState>('full')
 const panelWidth = ref(380)
 const resizing = ref(false)
 const fullscreen = ref(false)
-const tab = ref<'artifacts' | 'files' | 'diff' | 'preview'>('files')
 
-// 会话栏在窄屏变为抽屉：默认关闭，由顶栏/气泡按钮唤出
+// 会话侧栏在窄屏变为抽屉：默认关闭，由顶栏/气泡按钮唤出
 const sidebarOpen = ref(false)
-// 桌面端「收起侧边栏」状态：收起后不占网格列，由顶栏按钮展开
+// 桌面端「收起侧边栏」状态：收起后仅显示竖向图标 rail
 const sidebarCollapsed = ref(false)
+
+// ---- 右面板功能视图与文件预览标签 ----
+type SideView = 'artifacts' | 'files' | 'diff'
+const sideView = ref<SideView>('files')
+
+// 已打开的文件预览标签（手写 tabs）：点击文件已存在则切换，不存在则新开
+interface FileTab {
+  path: string
+  name: string
+  size: number
+  content: string
+  truncated: boolean
+  binary: boolean
+  note?: string
+}
+const openTabs = ref<FileTab[]>([])
+const activeTab = ref<string | null>(null)
+const tabLoading = ref(false)
+
+const activeTabData = computed(() => openTabs.value.find((t) => t.path === activeTab.value) ?? null)
+
+// 左侧功能图标（产物 / 所有文件 / 变更预览）
+const sideIcons: { key: SideView; label: string; icon: unknown }[] = [
+  { key: 'artifacts', label: '产物', icon: Sparkles },
+  { key: 'files', label: '所有文件', icon: FolderClosed },
+  { key: 'diff', label: '变更预览', icon: GitCompare },
+]
+
+/** 打开/切换文件预览标签：已存在直接切换，否则拉取内容后新开。 */
+async function openPreviewTab(path: string): Promise<void> {
+  if (!state.current) return
+  if (openTabs.value.some((t) => t.path === path)) {
+    activeTab.value = path
+    return
+  }
+  tabLoading.value = true
+  try {
+    const d = await api.files<{ ok: boolean; name?: string; size?: number; content?: string; truncated?: boolean; binary?: boolean; note?: string; error?: string }>(
+      state.current, path,
+    )
+    if (!d.ok) { message.error(d.error || '文件打开失败'); return }
+    // 二进制文件走 <flyfish-file-viewer> 渲染：激活标签前确保组件已注册
+    if (d.binary) await ensureFileViewer()
+    openTabs.value.push({
+      path,
+      name: d.name ?? path.split('/').pop() ?? path,
+      size: d.size ?? 0,
+      content: d.content ?? '',
+      truncated: !!d.truncated,
+      binary: !!d.binary,
+      note: d.note,
+    })
+    activeTab.value = path
+  } finally {
+    tabLoading.value = false
+  }
+}
+
+function closeTab(path: string): void {
+  const i = openTabs.value.findIndex((t) => t.path === path)
+  if (i < 0) return
+  openTabs.value.splice(i, 1)
+  if (activeTab.value === path) {
+    activeTab.value = openTabs.value[Math.min(i, openTabs.value.length - 1)]?.path ?? null
+  }
+}
+
+function showSide(key: SideView): void {
+  sideView.value = key
+  activeTab.value = null
+}
+
+function fmtSize(n: number): string {
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+  return `${(n / 1024 / 1024).toFixed(1)} MB`
+}
+
+// 会话切换：清空预览标签（文件树由 FilePanel 自行跟随 cid）
+watch(() => state.current, () => {
+  openTabs.value = []
+  activeTab.value = null
+  sideView.value = 'files'
+})
 
 // 会话栏宽度与右侧面板宽度的上下限：中屏时同步收窄，避免挤压对话区
 const sidebarWidth = computed(() => (bp.isLg ? 260 : bp.isMd ? 224 : 208))
@@ -56,14 +159,10 @@ const panelMax = computed(() => (bp.isLg ? 820 : bp.isMd ? 620 : 480))
 // 窄屏（<1024）下三列无法并排，右侧面板与会话栏都改为覆盖层
 const overlay = computed(() => bp.overlayPanel)
 
-const fileRef = ref<InstanceType<typeof FilePanel> | null>(null)
-const selected = computed(() => fileRef.value?.selected ?? null)
-
-// 面板实际占据的宽度：不展开/不在对话页时为 0，图标态为图标条宽度
+// 面板实际占据的宽度：收起为 0
 const panelCol = computed(() => {
   if (!props.showRight || !bp.isMd) return 0
   if (panelState.value === 'collapsed') return 0
-  if (panelState.value === 'icons') return 52
   return panelWidth.value
 })
 
@@ -110,11 +209,6 @@ const artifacts = computed(() => {
 
 function togglePanel(): void {
   panelState.value = panelState.value === 'collapsed' ? 'full' : 'collapsed'
-}
-
-function openPreview(): void {
-  tab.value = 'preview'
-  if (panelState.value !== 'full') panelState.value = 'full'
 }
 
 function startResize(e: MouseEvent): void {
@@ -210,12 +304,6 @@ function onDeleteConv(id: string): void {
 function downloadUrl(path: string): string {
   return state.current ? api.rawFileUrl(state.current, path) : '#'
 }
-
-// 面板从收起恢复展开时，回到此前停留的标签
-watch(
-  () => panelState.value,
-  (v) => { if (v === 'full') tab.value = tab.value },
-)
 
 // 视口变化时的状态收敛：变窄后退出全屏、关抽屉；恢复宽屏后收起浮层
 watch(
@@ -338,11 +426,11 @@ onBeforeUnmount(() => {
       <ChatWindow @send="sendText" />
     </section>
 
-    <!-- 列 3：结果面板（产物 / 所有文件 / 变更预览 / 文件预览） -->
+    <!-- 列 3：结果面板（左侧功能图标 + 手写多标签文件预览） -->
     <aside
       v-if="panelVisible"
       class="right"
-      :class="[`st-${panelState}`, { fullscreen, 'as-overlay': overlay }]"
+      :class="{ fullscreen, 'as-overlay': overlay }"
     >
       <div
         v-if="panelState === 'full' && !overlay"
@@ -350,130 +438,118 @@ onBeforeUnmount(() => {
         @mousedown.prevent="startResize"
       ></div>
 
-      <!-- 收起态：仅图标条 -->
-      <div v-if="panelState === 'icons' && !overlay" class="rail-icons">
-        <NButton quaternary circle title="展开：产物" @click="tab = 'artifacts'; panelState = 'full'">
-          <template #icon><Sparkles :size="18" /></template>
-        </NButton>
-        <NButton quaternary circle title="展开：文件" @click="tab = 'files'; panelState = 'full'">
-          <template #icon><FolderClosed :size="18" /></template>
-        </NButton>
-        <NButton quaternary circle title="展开：变更预览" @click="tab = 'diff'; panelState = 'full'">
-          <template #icon><GitCompare :size="18" /></template>
-        </NButton>
-        <NButton quaternary circle title="展开：预览" @click="openPreview(); panelState = 'full'">
-          <template #icon><FileText :size="18" /></template>
-        </NButton>
-        <NButton quaternary circle title="完全展开" @click="panelState = 'full'">
-          <template #icon><PanelRightOpen :size="18" /></template>
-        </NButton>
+      <!-- 头部：有预览标签时功能图标移到头部（hover 下拉面板），中间是手写预览 tabs -->
+      <div class="panel-head">
+        <template v-if="activeTabData">
+          <div v-for="v in sideIcons" :key="v.key" class="ph-host">
+            <button class="ph-ico" :title="v.label" @click="showSide(v.key)">
+              <component :is="v.icon" :size="16" />
+            </button>
+            <!-- hover 下拉出对应功能面板 -->
+            <div class="ph-fly">
+              <div class="ph-fly-body">
+                <div v-if="v.key === 'artifacts'" class="artifact-list ph-fly-list">
+                  <template v-if="artifacts.length">
+                    <div v-for="(a, i) in artifacts" :key="i" class="artifact-card">
+                      <span class="ac-ico"><Sparkles :size="15" /></span>
+                      <span class="ac-body">
+                        <div class="ac-name">{{ toolLabel(a.name) }}</div>
+                        <div class="ac-meta muted">{{ a.name }}</div>
+                      </span>
+                    </div>
+                  </template>
+                  <NEmpty v-else class="page-empty" description="本轮还没有产生结果" />
+                </div>
+                <FilePanel v-else @open="openPreviewTab" />
+              </div>
+            </div>
+          </div>
+          <div class="pv-tabs">
+            <span
+              v-for="t in openTabs"
+              :key="t.path"
+              class="pv-tab"
+              :class="{ active: t.path === activeTab }"
+              :title="t.path"
+              @click="activeTab = t.path"
+            >
+              <FileText :size="12" />
+              <span class="pv-tab-name">{{ t.name }}</span>
+              <X :size="11" class="pv-tab-x" @click.stop="closeTab(t.path)" />
+            </span>
+          </div>
+        </template>
+        <div class="rp-actions">
+          <NButton quaternary circle size="small" :title="fullscreen ? '退出全屏' : '全屏'" @click="fullscreen = !fullscreen">
+            <template #icon>
+              <component :is="fullscreen ? Minimize2 : Maximize2" :size="15" />
+            </template>
+          </NButton>
+          <NButton quaternary circle size="small" title="收起面板" @click="panelState = 'collapsed'">
+            <template #icon><X :size="15" /></template>
+          </NButton>
+        </div>
       </div>
 
-      <template v-else>
-        <div class="panel-tabs">
-          <NTabs
-            :value="tab"
-            type="line"
-            size="small"
-            class="rp-tabs"
-            @update:value="(v: string) => (tab = v as typeof tab)"
-          >
-            <NTabPane name="artifacts">
-              <template #tab><span class="tab-label"><Sparkles :size="14" /> <span class="tab-text">产物</span></span></template>
-            </NTabPane>
-            <NTabPane name="files">
-              <template #tab><span class="tab-label"><FolderClosed :size="14" /> <span class="tab-text">所有文件</span></span></template>
-            </NTabPane>
-            <NTabPane name="diff">
-              <template #tab><span class="tab-label"><GitCompare :size="14" /> <span class="tab-text">变更预览</span></span></template>
-            </NTabPane>
-            <NTabPane name="preview">
-              <template #tab><span class="tab-label"><FileText :size="14" /> <span class="tab-text">文件预览</span></span></template>
-            </NTabPane>
-          </NTabs>
-          <div class="rp-actions">
-            <NButton quaternary circle size="small" :title="fullscreen ? '退出全屏' : '全屏'" @click="fullscreen = !fullscreen">
-              <template #icon>
-                <component :is="fullscreen ? Minimize2 : Maximize2" :size="15" />
-              </template>
-            </NButton>
-            <NButton
-              v-if="!overlay"
-              quaternary
-              circle
-              size="small"
-              title="收起到图标"
-              @click="panelState = 'icons'"
+      <!-- 主体 -->
+      <div class="rp-wrap">
+        <!-- 无预览标签：左侧功能图标条 + 对应面板常驻（即「下拉放到面板里面」） -->
+        <template v-if="!activeTabData">
+          <div class="rp-side">
+            <button
+              v-for="v in sideIcons"
+              :key="v.key"
+              class="rp-side-ico"
+              :class="{ active: sideView === v.key }"
+              :title="v.label"
+              @click="sideView = v.key"
             >
-              <template #icon><PanelRight :size="15" /></template>
-            </NButton>
-            <NButton quaternary circle size="small" title="关闭面板" @click="panelState = 'collapsed'">
-              <template #icon><X :size="15" /></template>
-            </NButton>
+              <component :is="v.icon" :size="17" />
+            </button>
           </div>
-        </div>
-
-        <!-- 产物 -->
-        <div v-if="tab === 'artifacts'" class="artifact-pane">
-          <div class="artifact-list">
-            <div
-              v-for="(a, i) in artifacts"
-              :key="i"
-              class="artifact-card"
-            >
-              <span class="ac-ico"><Sparkles :size="15" /></span>
-              <span class="ac-body">
-                <div class="ac-name">{{ toolLabel(a.name) }}</div>
-                <div class="ac-meta muted">{{ a.name }}</div>
-              </span>
+          <div class="rp-content">
+            <!-- 产物 -->
+            <div v-if="sideView === 'artifacts'" class="artifact-pane">
+              <div v-if="artifacts.length" class="artifact-list">
+                <div v-for="(a, i) in artifacts" :key="i" class="artifact-card">
+                  <span class="ac-ico"><Sparkles :size="15" /></span>
+                  <span class="ac-body">
+                    <div class="ac-name">{{ toolLabel(a.name) }}</div>
+                    <div class="ac-meta muted">{{ a.name }}</div>
+                  </span>
+                </div>
+              </div>
+              <NEmpty v-else class="page-empty" description="本轮还没有产生结果" />
             </div>
-            <NEmpty v-if="!artifacts.length" class="page-empty" description="本轮还没有产生结果" />
+            <!-- 所有文件 / 变更预览：文件树，点击文件打开预览标签 -->
+            <FilePanel v-else @open="openPreviewTab" />
           </div>
-        </div>
-
-        <!-- 所有文件 -->
-        <FilePanel
-          v-show="tab === 'files'"
-          ref="fileRef"
-          @preview="tab = 'preview'"
-        />
-
-        <!-- 变更预览 -->
-        <div v-if="tab === 'diff'" class="diff-pane">
-          <div v-if="selected" class="file-view">
-            <div class="file-view-head">
-              <span class="file-name"><GitCompare :size="14" /> {{ selected.name }}</span>
-              <span class="muted">{{ selected.size }} B</span>
-              <NButton quaternary circle size="tiny" tag="a" :href="downloadUrl(selected.path)" target="_blank" title="下载">
-                <template #icon><Download :size="14" /></template>
-              </NButton>
+        </template>
+        <!-- 文件预览：文本直接渲染，其他格式走 file-viewer -->
+        <template v-else>
+          <div v-if="tabLoading" class="file-hint muted">加载中…</div>
+          <template v-else-if="activeTabData">
+            <div v-if="activeTabData.binary" class="pv-viewer">
+              <flyfish-file-viewer
+                :key="activeTabData.path"
+                :src="downloadUrl(activeTabData.path)"
+                :filename="activeTabData.name"
+                locale="zh-CN"
+                theme="light"
+              />
             </div>
-            <NScrollbar class="preview-scroll">
-              <pre class="file-content">{{ selected.content }}</pre>
-            </NScrollbar>
-          </div>
-          <NEmpty v-else class="page-empty" description="在「所有文件」中选择一个文本文件即可查看内容" />
-        </div>
-
-        <!-- 文件预览 -->
-        <div v-if="tab === 'preview'" class="preview-pane">
-          <template v-if="selected">
-            <div class="file-view-head">
-              <span class="file-name">{{ selected.name }}</span>
-              <span class="muted">{{ selected.size }} B</span>
-              <NButton quaternary circle size="tiny" tag="a" :href="downloadUrl(selected.path)" target="_blank" title="下载">
-                <template #icon><Download :size="14" /></template>
-              </NButton>
-            </div>
-            <div v-if="selected.binary" class="file-hint muted">{{ selected.note || '二进制文件，无法直接预览，请下载。' }}</div>
-            <div v-else-if="selected.truncated" class="file-hint muted">{{ selected.note || '文件过大，仅显示部分内容。' }}</div>
-            <NScrollbar v-else class="preview-scroll">
-              <pre class="file-content">{{ selected.content }}</pre>
-            </NScrollbar>
+            <template v-else>
+              <div v-if="activeTabData.truncated" class="file-hint muted">
+                {{ activeTabData.note || '文件过大，仅显示部分内容。' }}
+                <a :href="downloadUrl(activeTabData.path)" target="_blank" rel="noopener">下载完整文件</a>
+              </div>
+              <NScrollbar class="pv-scroll">
+                <pre class="file-content">{{ activeTabData.content }}</pre>
+              </NScrollbar>
+            </template>
           </template>
-          <NEmpty v-else class="page-empty" description="在「所有文件」中点击一个文本文件即可在此预览" />
-        </div>
-      </template>
+        </template>
+      </div>
     </aside>
 
     <SkillModal :open="showModal" @close="showModal = false" @submit="onSubmit" />

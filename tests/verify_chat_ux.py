@@ -201,7 +201,7 @@ async def main() -> int:
             """() => {
               const bar = document.querySelector('.toolbar');
               const panel = document.querySelector('.right.as-overlay');
-              const tabs = [...document.querySelectorAll('.rp-tabs .n-tabs-tab')];
+              const tabs = [...document.querySelectorAll('.ph-host .ph-ico, .pv-tab')];
               const acts = document.querySelector('.rp-actions');
               const r = (e) => { const b = e.getBoundingClientRect(); return {t:b.top, r:b.right, l:b.left, b:b.bottom}; };
               return {
