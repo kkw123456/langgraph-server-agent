@@ -21,7 +21,8 @@ CREATE TABLE IF NOT EXISTS conversations (
     id          TEXT PRIMARY KEY,
     title       TEXT NOT NULL DEFAULT '新对话',
     created_at  REAL NOT NULL,
-    updated_at  REAL NOT NULL
+    updated_at  REAL NOT NULL,
+    owner       TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -63,37 +64,45 @@ class ConversationStore:
         conn = self._conn()
         with conn:
             conn.executescript(SCHEMA)
-            # 旧库迁移：messages 表补 reasoning（思考链）列
+            # 旧库迁移：messages 补 reasoning/attachments，conversations 补 owner
             cols = [r[1] for r in conn.execute("PRAGMA table_info(messages)").fetchall()]
             if "reasoning" not in cols:
                 conn.execute("ALTER TABLE messages ADD COLUMN reasoning TEXT")
+            if "attachments" not in cols:
+                conn.execute("ALTER TABLE messages ADD COLUMN attachments TEXT")
+            ccols = [r[1] for r in conn.execute("PRAGMA table_info(conversations)").fetchall()]
+            if "owner" not in ccols:
+                conn.execute("ALTER TABLE conversations ADD COLUMN owner TEXT NOT NULL DEFAULT ''")
 
     # ---------- 元数据 ----------
-    def list(self) -> list:
-        rows = self._conn().execute(
-            "SELECT id, title, created_at, updated_at "
-            "FROM conversations ORDER BY updated_at DESC"
-        ).fetchall()
+    def list(self, owner: str | None = None) -> list:
+        """列出会话；owner 非 None 时只返回该用户的（owner 为空的旧会话对所有人可见）。"""
+        sql = "SELECT id, title, created_at, updated_at, owner FROM conversations"
+        args: tuple = ()
+        if owner is not None:
+            sql += " WHERE owner IN ('', ?)"
+            args = (owner,)
+        rows = self._conn().execute(sql + " ORDER BY updated_at DESC", args).fetchall()
         return [dict(r) for r in rows]
 
     def get(self, cid: str):
         row = self._conn().execute(
-            "SELECT id, title, created_at, updated_at FROM conversations WHERE id = ?",
+            "SELECT id, title, created_at, updated_at, owner FROM conversations WHERE id = ?",
             (cid,),
         ).fetchone()
         return dict(row) if row else None
 
-    def create(self, title: str = "新对话") -> dict:
+    def create(self, title: str = "新对话", owner: str = "") -> dict:
         cid = uuid.uuid4().hex
         now = time.time()
         conn = self._conn()
         with conn:
             conn.execute(
-                "INSERT INTO conversations (id, title, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?)",
-                (cid, title, now, now),
+                "INSERT INTO conversations (id, title, created_at, updated_at, owner) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (cid, title, now, now, owner or ""),
             )
-        return {"id": cid, "title": title, "created_at": now, "updated_at": now}
+        return {"id": cid, "title": title, "created_at": now, "updated_at": now, "owner": owner or ""}
 
     def delete(self, cid: str):
         conn = self._conn()
@@ -120,7 +129,7 @@ class ConversationStore:
     # ---------- 消息 ----------
     def load_messages(self, cid: str) -> list:
         rows = self._conn().execute(
-            "SELECT role, content, tool_calls FROM messages "
+            "SELECT role, content, tool_calls, reasoning, attachments FROM messages "
             "WHERE cid = ? ORDER BY seq ASC",
             (cid,),
         ).fetchall()
@@ -136,6 +145,13 @@ class ConversationStore:
             reasoning = r["reasoning"] if "reasoning" in r.keys() else None
             if reasoning:
                 m["reasoning"] = reasoning
+            # 用户消息的附件清单（JSON：[{path,name,size}]）
+            att = r["attachments"] if "attachments" in r.keys() else None
+            if att:
+                try:
+                    m["attachments"] = json.loads(att)
+                except Exception:
+                    pass
             out.append(m)
         return out
 
@@ -145,8 +161,8 @@ class ConversationStore:
         with conn:
             conn.execute("DELETE FROM messages WHERE cid = ?", (cid,))
             conn.executemany(
-                "INSERT INTO messages (cid, seq, role, content, tool_calls, reasoning) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT INTO messages (cid, seq, role, content, tool_calls, reasoning, attachments) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 [
                     (
                         cid,
@@ -157,6 +173,9 @@ class ConversationStore:
                         if m.get("tool_calls")
                         else None,
                         m.get("reasoning") or None,
+                        json.dumps(m["attachments"], ensure_ascii=False)
+                        if m.get("attachments")
+                        else None,
                     )
                     for i, m in enumerate(messages)
                 ],

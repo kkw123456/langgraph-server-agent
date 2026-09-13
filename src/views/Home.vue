@@ -28,8 +28,8 @@ import {
   NButton, NScrollbar, NEmpty, useMessage,
 } from 'naive-ui'
 import {
-  ChevronsRight, ChevronsLeft,
-  FileText, FolderClosed, GitCompare, Maximize2, Minimize2, Sparkles,
+  PanelRightClose, PanelRightOpen,
+  FileText, FolderClosed, GitCompare, Maximize2, Minimize2, Plus, RotateCw, Sparkles,
   X, List,
 } from 'lucide-vue-next'
 import {
@@ -76,6 +76,16 @@ const activeTab = ref<string | null>(null)
 const tabLoading = ref(false)
 
 const activeTabData = computed(() => openTabs.value.find((t) => t.path === activeTab.value) ?? null)
+const tabsEl = ref<HTMLElement | null>(null)
+// 文件标签栏：鼠标滚轮横向滚动（标签多时不挤爆面板）
+function onTabsWheel(e: WheelEvent): void {
+  const el = tabsEl.value
+  if (!el) return
+  if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+    el.scrollLeft += e.deltaY
+    e.preventDefault()
+  }
+}
 
 // 左侧功能图标（产物 / 所有文件 / 变更预览）
 const sideIcons: { key: SideView; label: string; icon: unknown }[] = [
@@ -84,15 +94,22 @@ const sideIcons: { key: SideView; label: string; icon: unknown }[] = [
   { key: 'diff', label: '变更预览', icon: GitCompare },
 ]
 
-/** 打开/切换文件预览标签：已存在直接切换，否则拉取内容后新开。 */
-async function openPreviewTab(path: string): Promise<void> {
+/** 打开/切换文件预览标签：已存在直接切换，否则拉取内容后新开。
+ *  打开文件时右面板自动展开并适当加宽（阅读/预览需要更多空间）。 */
+async function openPreviewTab(path: string, opts?: { force?: boolean }): Promise<void> {
   if (!state.current) return
-  if (openTabs.value.some((t) => t.path === path)) {
+  if (!opts?.force && openTabs.value.some((t) => t.path === path)) {
     activeTab.value = path
+    widenPanel()
     return
   }
   tabLoading.value = true
   try {
+    // force 刷新：先移除旧标签再重新拉取
+    if (opts?.force) {
+      const i = openTabs.value.findIndex((t) => t.path === path)
+      if (i >= 0) openTabs.value.splice(i, 1)
+    }
     const d = await api.files<{ ok: boolean; name?: string; size?: number; content?: string; truncated?: boolean; binary?: boolean; note?: string; error?: string }>(
       state.current, path,
     )
@@ -109,9 +126,28 @@ async function openPreviewTab(path: string): Promise<void> {
       note: d.note,
     })
     activeTab.value = path
+    widenPanel()
   } finally {
     tabLoading.value = false
   }
+}
+
+/** 文件打开时把右面板加宽到更舒适的预览宽度（不超过断点上限）。 */
+function widenPanel(): void {
+  if (panelState.value !== 'full') panelState.value = 'full'
+  const target = Math.min(panelMax.value, Math.max(panelWidth.value, 520))
+  if (target > panelWidth.value) panelWidth.value = target
+}
+
+/** rp-actions 的刷新：重新拉取当前预览文件 + 刷新文件树。 */
+function refreshActive(): void {
+  state.filesTick++
+  if (activeTab.value) void openPreviewTab(activeTab.value, { force: true })
+}
+
+/** 消息附件卡片：打开右侧面板预览工作目录文件。 */
+function openAttachment(path: string): void {
+  void openPreviewTab(path)
 }
 
 function closeTab(path: string): void {
@@ -194,6 +230,12 @@ function togglePanel(): void {
   panelState.value = panelState.value === 'collapsed' ? 'full' : 'collapsed'
 }
 
+// 移动端 header 的新建会话
+async function onNewChat(): Promise<void> {
+  await newChat()
+  if (route.path !== '/') router.push('/')
+}
+
 function startResize(e: MouseEvent): void {
   if (panelState.value !== 'full' || !props.showRight) return
   resizing.value = true
@@ -267,21 +309,22 @@ onBeforeUnmount(() => {
     :class="{ resizing, 'as-overlay': overlay }"
     :style="{ gridTemplateColumns: gridTemplate }"
   >
-    <!-- 列 1：对话区（无 header；浮动按钮：移动端唤出抽屉 / 右面板切换） -->
+    <!-- 列 1：对话区（移动端顶部 header：会话列表 / 标题 / 新建 / 项目；右面板开关联动） -->
     <section class="main">
+      <header v-if="overlay" class="m-header">
+        <NButton quaternary circle size="small" title="会话列表" @click="state.sidebarOpen = true">
+          <template #icon><List :size="18" /></template>
+        </NButton>
+        <b class="m-title">{{ state.convTitle }}</b>
+        <NButton quaternary circle size="small" title="新建会话" @click="onNewChat">
+          <template #icon><Plus :size="18" /></template>
+        </NButton>
+        <NButton quaternary circle size="small" title="项目" @click="router.push('/projects')">
+          <template #icon><FolderClosed :size="17" /></template>
+        </NButton>
+      </header>
       <NButton
-        v-if="overlay"
-        quaternary
-        circle
-        size="small"
-        class="float-btn drawer-btn"
-        title="会话列表"
-        @click="state.sidebarOpen = true"
-      >
-        <template #icon><List :size="16" /></template>
-      </NButton>
-      <NButton
-        v-if="showRight"
+        v-if="showRight && !overlay"
         quaternary
         circle
         size="small"
@@ -290,11 +333,11 @@ onBeforeUnmount(() => {
         @click="togglePanel"
       >
         <template #icon>
-          <component :is="panelState === 'collapsed' ? ChevronsLeft : ChevronsRight" :size="16" />
+          <component :is="panelState === 'collapsed' ? PanelRightOpen : PanelRightClose" :size="16" />
         </template>
       </NButton>
 
-      <ChatWindow @send="sendText" />
+      <ChatWindow @open-file="openAttachment" />
     </section>
 
     <!-- 列 3：结果面板（左侧功能图标 + 手写多标签文件预览） -->
@@ -335,7 +378,7 @@ onBeforeUnmount(() => {
               </div>
             </div>
           </div>
-          <div class="pv-tabs">
+          <div ref="tabsEl" class="pv-tabs" @wheel="onTabsWheel">
             <span
               v-for="t in openTabs"
               :key="t.path"
@@ -351,13 +394,16 @@ onBeforeUnmount(() => {
           </div>
         </template>
         <div class="rp-actions">
+          <NButton quaternary circle size="small" title="刷新" @click="refreshActive">
+            <template #icon><RotateCw :size="15" /></template>
+          </NButton>
           <NButton quaternary circle size="small" :title="fullscreen ? '退出全屏' : '全屏'" @click="fullscreen = !fullscreen">
             <template #icon>
               <component :is="fullscreen ? Minimize2 : Maximize2" :size="15" />
             </template>
           </NButton>
           <NButton quaternary circle size="small" title="收起面板" @click="panelState = 'collapsed'">
-            <template #icon><X :size="15" /></template>
+            <template #icon><PanelRightClose :size="15" /></template>
           </NButton>
         </div>
       </div>
@@ -405,6 +451,7 @@ onBeforeUnmount(() => {
                 :key="activeTabData.path"
                 :src="downloadUrl(activeTabData.path)"
                 :filename="activeTabData.name"
+                :options="{ toolbar: false }"
                 locale="zh-CN"
                 theme="light"
               />

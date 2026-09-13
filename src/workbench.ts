@@ -15,6 +15,10 @@ interface WorkbenchState {
   library: LibraryItem[]
   runtime: RuntimeInfo
   loading: boolean
+  /** 各域首载骨架屏开关：仅在列表为空时置位，避免轮询刷新闪烁 */
+  loadingProjects: boolean
+  loadingAutomations: boolean
+  loadingLibrary: boolean
 }
 
 export const wb = reactive<WorkbenchState>({
@@ -23,12 +27,21 @@ export const wb = reactive<WorkbenchState>({
   library: [],
   runtime: { model: '', models: [], skills_enabled: 0, skills_total: 0 },
   loading: false,
+  loadingProjects: false,
+  loadingAutomations: false,
+  loadingLibrary: false,
 })
 
 // ===================== 项目空间 =====================
 export async function loadProjects(): Promise<void> {
-  const r = await api.get<Project[] | { ok: false }>('/api/projects')
-  wb.projects = Array.isArray(r) ? r : []
+  const first = wb.projects.length === 0
+  if (first) wb.loadingProjects = true
+  try {
+    const r = await api.get<Project[] | { ok: false }>('/api/projects')
+    wb.projects = Array.isArray(r) ? r : []
+  } finally {
+    wb.loadingProjects = false
+  }
 }
 
 export async function createProject(
@@ -73,8 +86,14 @@ export async function removeConvFromProject(pid: string, cid: string): Promise<b
 
 // ===================== 自动化 =====================
 export async function loadAutomations(): Promise<void> {
-  const r = await api.get<Automation[] | { ok: false }>('/api/automations')
-  wb.automations = Array.isArray(r) ? r : []
+  const first = wb.automations.length === 0
+  if (first) wb.loadingAutomations = true
+  try {
+    const r = await api.get<Automation[] | { ok: false }>('/api/automations')
+    wb.automations = Array.isArray(r) ? r : []
+  } finally {
+    wb.loadingAutomations = false
+  }
 }
 
 export interface AutomationInput {
@@ -124,9 +143,15 @@ export async function runAutomation(id: string): Promise<string | null> {
 
 // ===================== 资料库 =====================
 export async function loadLibrary(q = ''): Promise<void> {
-  const url = q ? `/api/library?q=${encodeURIComponent(q)}` : '/api/library'
-  const r = await api.get<LibraryItem[] | { ok: false }>(url)
-  wb.library = Array.isArray(r) ? r : []
+  const first = q === '' && wb.library.length === 0
+  if (first) wb.loadingLibrary = true
+  try {
+    const url = q ? `/api/library?q=${encodeURIComponent(q)}` : '/api/library'
+    const r = await api.get<LibraryItem[] | { ok: false }>(url)
+    wb.library = Array.isArray(r) ? r : []
+  } finally {
+    wb.loadingLibrary = false
+  }
 }
 
 export interface LibraryInput {
@@ -176,6 +201,34 @@ export async function setModel(name: string): Promise<boolean> {
   }
   wb.runtime.model = r.model || name
   toast.success(`已切换到 ${wb.runtime.model}`)
+  return true
+}
+
+/** 添加模型到可用列表（持久化到服务端）。 */
+export async function addModel(name: string): Promise<boolean> {
+  const n = (name || '').trim()
+  if (!n) return false
+  const r = await api.post<{ ok: boolean; models?: string[]; error?: string }>('/api/runtime/models', { name: n })
+  if (!r.ok) {
+    toast.error(r.error || '添加失败')
+    return false
+  }
+  wb.runtime.models = r.models || []
+  toast.success(`已添加模型 ${n}`)
+  return true
+}
+
+/** 从可用列表移除模型。 */
+export async function removeModel(name: string): Promise<boolean> {
+  const r = await api.del<{ ok: boolean; models?: string[]; model?: string; error?: string }>(
+    `/api/runtime/models/${encodeURIComponent(name)}`,
+  )
+  if (!r.ok) {
+    toast.error(r.error || '删除失败')
+    return false
+  }
+  wb.runtime.models = r.models || []
+  if (r.model) wb.runtime.model = r.model
   return true
 }
 

@@ -43,6 +43,11 @@ class AgentManager:
         lines = [
             "你是一个运行在 LangGraph 上的服务端 AI 助手，支持多轮对话、工具调用与技能包管理。",
             "请根据用户需求，合理使用当前已启用的工具与技能包来完成任务。",
+            "",
+            "图片回显约定：当回复中需要展示图片（图表、生成的图像、处理后的图片等）时，"
+            "把图片文件保存到当前工作目录的 tmp/ 子目录（如 tmp/chart_1.png），"
+            "并在正文中用 Markdown 图片语法引用相对路径，例如 ![图表](tmp/chart_1.png)，"
+            "前端会自动渲染该图片。",
         ]
         skills = self.registry.enabled_skills()
         if skills:

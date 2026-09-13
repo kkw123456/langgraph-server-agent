@@ -3,7 +3,7 @@
 // 技能的全部操作（启停/重载/新建/删除）与后端 /api/skills 打通。
 import { ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
-import { NTabs, NTabPane, NCard, NTag, NEmpty, useMessage } from 'naive-ui'
+import { NTabs, NTabPane, NCard, NTag, NEmpty, NSkeleton, useMessage } from 'naive-ui'
 import { Puzzle, Plug, Bot, Check, X as XIcon } from 'lucide-vue-next'
 import {
   state, loadSkills, toggleSkill, removeSkill, reloadSkills, createSkill,
@@ -34,8 +34,10 @@ async function onSubmit(payload: CreateSkillPayload): Promise<void> {
 
 // 侧栏「新建技能」入口跳转 /experts?new=1，进入本页时自动打开创建弹窗
 const route = useRoute()
-onMounted(() => {
-  void loadSkills()
+const loadingSkills = ref(true)
+onMounted(async () => {
+  await loadSkills()
+  loadingSkills.value = false
   if (route.query.new === '1') showModal.value = true
 })
 </script>
@@ -59,8 +61,16 @@ onMounted(() => {
         </NTabPane>
       </NTabs>
 
+      <!-- 技能首载骨架屏 -->
+      <div v-if="tab === 'skills' && loadingSkills" class="grid-cards">
+        <NCard v-for="i in 4" :key="'sk' + i" size="small">
+          <NSkeleton text width="42%" class="sk-title" />
+          <NSkeleton text :repeat="2" />
+        </NCard>
+      </div>
+
       <SkillManager
-        v-if="tab === 'skills'"
+        v-else-if="tab === 'skills'"
         :skills="state.skills"
         @toggle="toggleSkill"
         @remove="removeSkill"

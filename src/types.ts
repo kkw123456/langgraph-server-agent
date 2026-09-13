@@ -14,6 +14,8 @@ export interface Message {
   content: string
   tool_calls?: ToolCall[]
   reasoning?: string // 思考链（deepseek/ark 等模型），历史消息一并返回
+  /** 用户消息携带的附件（已上传到会话工作目录），消息下方以卡片回显 */
+  attachments?: { path: string; name: string; size: number }[]
 }
 
 export interface Conversation {
@@ -49,7 +51,7 @@ export type WsEvent =
   | { type: 'token'; content: string }
   | { type: 'reasoning'; content: string }
   | { type: 'tool_start'; name: string; input: string; at?: number }
-  | { type: 'tool_end'; output: string }
+  | { type: 'tool_end'; output: string; name?: string; at?: number }
   | { type: 'message_end'; stopped?: boolean }
   | { type: 'error'; content: string }
   | { type: 'tool_confirm'; tool_calls: PendingToolCall[] }

@@ -52,7 +52,7 @@ $danger: #cf222e;
   /* 移动端底部菜单高度 */
   --tabbar-h: 56px;
   /* 对话内容列宽：消息气泡与输入框共用，保证左右边缘对齐 */
-  --chat-w: 880px;
+  --chat-w: 1000px;
   /* 内容最大宽度：超宽屏下避免行宽过长影响阅读 */
   --content-max: 1680px;
 }
@@ -483,7 +483,8 @@ body {
   box-shadow: 0 0 0 3.5px var(--accent-weak), 0 4px 16px rgba(24, 160, 88, .08);
 }
 .composer-input { flex: 1; }
-.composer-input .n-input__textarea-el { padding: 4px 0; }
+/* !important：压过 naive-ui 运行时注入的 textarea padding（CSS-in-JS 后插入） */
+.composer-input .n-input__textarea-el { padding: 7px 0 !important; }
 .composer-bar { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .composer-bar .grow { flex: 1; min-width: 0; }
 .composer-model { width: 168px; flex: 0 0 auto; }
@@ -619,8 +620,8 @@ body {
 .file-item.dir .fi-icon, .file-item.dir .fi-arrow { color: var(--accent); }
 .file-item.dir.open .fi-icon { color: var(--accent); }
 .fi-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.fi-meta { font-size: 11px; min-width: 56px; text-align: right; flex: 0 0 auto; }
-.fi-time { min-width: 72px; }
+.fi-meta { font-size: 11px; min-width: 56px; text-align: right; flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+.fi-time { min-width: 78px; flex: 0 0 78px; text-align: right; font-variant-numeric: tabular-nums; }
 .fi-dl { opacity: 0; flex: 0 0 auto; }
 .file-item:hover .fi-dl { opacity: 1; }
 .file-content {
@@ -846,3 +847,105 @@ body {
   .sidebar, .right, .composer, .tabbar, .page-actions { display: none !important; }
   .app-root, .app-body, .app-shell { display: block; height: auto; overflow: visible; }
 }
+
+/* ============================================================
+   v2 增补：模型管理 / 移动端 header / 附件卡片 / 拖拽高亮
+   ============================================================ */
+
+/* ---- 设置页：模型管理 ---- */
+.set-row-top { align-items: flex-start; }
+.set-model-input { width: 260px; max-width: 100%; }
+.set-model-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.set-model-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel);
+  font-family: "SF Mono", Consolas, monospace;
+  font-size: 12px;
+  transition: border-color .15s ease, background .15s ease;
+  &.current { border-color: var(--accent); background: var(--accent-weak); }
+}
+.set-model-name {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.set-model-btn { opacity: .6; &:hover { opacity: 1; } }
+
+/* ---- 移动端顶栏（Home：会话列表 / 标题 / 新建 / 项目） ---- */
+.m-header { display: none; }
+@media (max-width: 767px) {
+  .m-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 0 0 auto;
+    height: 46px;
+    padding: 0 8px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+  }
+  .m-title {
+    flex: 1;
+    min-width: 0;
+    text-align: center;
+    font-size: 15px;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  /* 移动端不展示 AI / 用户头像图标 */
+  .msg .avatar, .msg .avatar-holder { display: none; }
+}
+
+/* ---- 聊天输入框：拖拽文件悬停高亮 ---- */
+.composer.drag-over .composer-inner {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-weak);
+  background: var(--accent-weak);
+}
+
+/* ---- 消息附件卡片（用户消息下方，点击在右面板打开） ---- */
+.msg-attach {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+.ma-card {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 260px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  cursor: pointer;
+  transition: border-color .15s ease, box-shadow .15s ease;
+  &:hover {
+    border-color: var(--accent);
+    box-shadow: 0 2px 8px rgba(24, 160, 88, .12);
+  }
+}
+.ma-ico { flex: 0 0 auto; color: var(--accent); }
+.ma-main { min-width: 0; display: flex; flex-direction: column; }
+.ma-name {
+  font-size: 12.5px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ma-meta { font-size: 11px; color: var(--muted); }
+.ma-eye { flex: 0 0 auto; color: var(--muted); }
+
+/* ---- 骨架屏辅助间距 ---- */
+.sk-title { margin-bottom: 10px; }
+.sk-line { margin-top: 8px; }

@@ -5,7 +5,7 @@ import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   NCard, NButton, NModal, NForm, NFormItem, NInput, NSelect, NEmpty, NPopconfirm,
-  NTag, useMessage,
+  NTag, NSkeleton, useMessage,
 } from 'naive-ui'
 import { FolderClosed, Plus, Pencil, Trash2, MessageSquare, X, LogIn } from 'lucide-vue-next'
 import { state, loadConvs, selectConv } from '../store'
@@ -122,8 +122,17 @@ onBeforeUnmount(() => stopBusy && stopBusy())
     </div>
 
     <div class="page-body">
+      <!-- 首载骨架屏 -->
+      <div v-if="wb.loadingProjects" class="grid-cards">
+        <NCard v-for="i in 3" :key="'sk' + i" size="small">
+          <NSkeleton text width="45%" class="sk-title" />
+          <NSkeleton text :repeat="2" />
+          <NSkeleton text width="50%" class="sk-line" />
+        </NCard>
+      </div>
+
       <NEmpty
-        v-if="!wb.projects.length"
+        v-else-if="!wb.projects.length"
         class="page-empty"
         description="还没有项目，把相关会话归到一起会更容易管理"
       />

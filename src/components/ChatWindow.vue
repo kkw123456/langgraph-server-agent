@@ -1,15 +1,16 @@
 <script setup lang="ts">
 import { ref, watch, nextTick, computed } from 'vue'
-import { NInput, NButton, NSelect, NRadioGroup, NRadioButton, NIcon } from 'naive-ui'
+import { NInput, NButton, NSelect, NRadioGroup, NRadioButton } from 'naive-ui'
 import {
-  Send, Sparkles, Loader2, Paperclip, Globe, ListChecks, Code2, FileText,
-  Table2, Search, Bug, Wand2, Palette, Image, Braces, Square, File as FileIco, X, ShieldCheck,
+  Send, Sparkles, Loader2, ListChecks, Code2, FileText,
+  Table2, Search, Bug, Wand2, Palette, Image, Braces, Globe, Square, File as FileIco, X, ShieldCheck,
 } from 'lucide-vue-next'
-import { state, stopChat, setMode } from '../store'
+import { state, stopChat, setMode, sendText } from '../store'
 import { wb, setModel } from '../workbench'
 import MessageBubble from './MessageBubble.vue'
 
-const emit = defineEmits<{ send: [text: string, files: File[]] }>()
+// 附件卡片点击 → 请求 Home 打开右侧面板预览该文件
+const emit = defineEmits<{ 'open-file': [path: string] }>()
 const draft = ref('')
 const box = ref<HTMLElement | null>(null)
 const inputRef = ref<InstanceType<typeof NInput> | null>(null)
@@ -25,7 +26,8 @@ const MAX_SIZE = 15 * 1024 * 1024
 const busy = computed(() => state.waiting || state.running || !!state.live)
 const streaming = computed(() => !!state.live)
 const empty = computed(() => !state.messages.length && !state.live && !state.waiting)
-const uploading = computed(() => busy.value) // 附件选择仅阻断重复发送，上传在 send 内完成
+// 发送过程 loading：上传附件 + 发出消息期间（busy 接管后由停止键替换）
+const sending = ref(false)
 
 // 场景化快捷入口：点一下等于「新建会话 + 发送该指令」
 const SCENES: Record<string, { icon: unknown; title: string; desc: string; prompt: string }[]> = {
@@ -56,11 +58,16 @@ const modelOptions = computed(() =>
     .map((m) => ({ label: m, value: m })),
 )
 
-function submit(): void {
-  if (busy.value || uploading.value) return // 进行中禁止重复发送
+async function submit(): Promise<void> {
+  if (busy.value || sending.value) return // 进行中禁止重复发送
   const t = draft.value
   if (!t.trim() && !pendingFiles.value.length) return
-  emit('send', t, [...pendingFiles.value])
+  sending.value = true
+  try {
+    await sendText(t, [...pendingFiles.value])
+  } finally {
+    sending.value = false
+  }
   draft.value = ''
   pendingFiles.value = []
 }
@@ -86,10 +93,25 @@ async function onModel(v: string): Promise<void> {
   if (v && v !== wb.runtime.model) await setModel(v)
 }
 
-// ===================== 附件 =====================
-function pickFiles(): void {
-  if (busy.value) return
-  fileRef.value?.click()
+// ===================== 附件（拖拽 / 粘贴上传） =====================
+function addFiles(list: FileList | File[] | null): void {
+  for (const f of Array.from(list || [])) {
+    if (pendingFiles.value.length >= MAX_FILES) break
+    if (f.size > MAX_SIZE) continue
+    if (pendingFiles.value.some((x) => x.name === f.name && x.size === f.size)) continue
+    pendingFiles.value.push(f)
+  }
+}
+function onDrop(e: DragEvent): void {
+  dragOver.value = false
+  if (e.dataTransfer?.files?.length) addFiles(e.dataTransfer.files)
+}
+function onPaste(e: ClipboardEvent): void {
+  const files = e.clipboardData?.files
+  if (files?.length) {
+    e.preventDefault()
+    addFiles(files)
+  }
 }
 function onFilesChosen(e: Event): void {
   const input = e.target as HTMLInputElement
@@ -110,6 +132,9 @@ function fmtSize(n: number): string {
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
   return `${(n / 1024 / 1024).toFixed(1)} MB`
 }
+
+// 拖拽悬停高亮
+const dragOver = ref(false)
 
 // 历史消息或流式消息变化均自动滚动到底部（含思考链与等待状态）
 watch(
@@ -159,7 +184,7 @@ watch(() => state.current, () => { draft.value = '' })
       </div>
 
       <template v-else>
-        <MessageBubble v-for="(m, i) in state.messages" :key="'h' + i" :msg="m" />
+        <MessageBubble v-for="(m, i) in state.messages" :key="'h' + i" :msg="m" @open-file="(p: string) => emit('open-file', p)" />
         <!-- 等待模型回复：shimmer 呼吸占位（避免发送后聊天区毫无反馈） -->
         <div v-if="state.waiting && !state.live" class="msg assistant">
           <div class="avatar-holder">
@@ -174,7 +199,13 @@ watch(() => state.current, () => { draft.value = '' })
       </template>
     </section>
 
-    <footer class="composer">
+    <footer
+      class="composer"
+      :class="{ 'drag-over': dragOver }"
+      @dragover.prevent="dragOver = true"
+      @dragleave.prevent="dragOver = false"
+      @drop.prevent="onDrop"
+    >
       <div class="composer-inner">
         <!-- 待上传附件 chips -->
         <div v-if="pendingFiles.length" class="attach-row">
@@ -191,17 +222,14 @@ watch(() => state.current, () => { draft.value = '' })
           ref="inputRef"
           v-model:value="draft"
           type="textarea"
-          :autosize="{ minRows: 1, maxRows: 8 }"
-          placeholder="描述你的任务，Shift + Enter 换行…"
+          :autosize="{ minRows: 2, maxRows: 8 }"
+          placeholder="描述你的任务，Shift + Enter 换行；支持把文件拖进输入框或直接粘贴附件…"
           :bordered="false"
           class="composer-input"
           @keydown="onKeydown"
+          @paste="onPaste"
         />
         <div class="composer-bar">
-          <!-- 附件：选择文件，发送时上传到会话工作目录 -->
-          <NButton class="composer-aux" quaternary circle size="small" title="上传文件到工作目录" @click="pickFiles">
-            <template #icon><Paperclip :size="16" /></template>
-          </NButton>
           <!-- 权限模式：模型选择左侧 -->
           <NRadioGroup
             class="composer-mode"
@@ -241,11 +269,12 @@ watch(() => state.current, () => { draft.value = '' })
             v-else
             class="send-btn"
             circle
-            :disabled="!draft.trim() && !pendingFiles.length"
+            :loading="sending"
+            :disabled="(!draft.trim() && !pendingFiles.length) || sending"
             title="发送"
             @click="submit"
           >
-            <template #icon><Send :size="16" /></template>
+            <template #icon><Send v-if="!sending" :size="16" /><Loader2 v-else :size="16" class="spin" /></template>
           </NButton>
         </div>
       </div>

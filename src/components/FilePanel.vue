@@ -69,12 +69,26 @@ async function listDir(path: string): Promise<TreeNode[]> {
   return toNodes(path, d.entries)
 }
 
-async function rebuild(): Promise<void> {
+async function rebuild(auto = false): Promise<void> {
   if (!cid.value) { tree.value = []; error.value = ''; return }
   loading.value = true
   error.value = ''
   try {
     tree.value = await listDir('')
+    // 首次加载该会话：根目录条目不足 5 个时，自动展开所有子目录一层，减少无效点击
+    if (auto && tree.value.length < 5) {
+      for (const n of tree.value) {
+        if (n.type !== 'dir') continue
+        try {
+          n.expanded = true
+          n.loaded = true
+          n.children = await listDir(n.path)
+        } catch {
+          n.expanded = false
+          n.loaded = false
+        }
+      }
+    }
     // 递归恢复已展开目录的内容
     const restore = async (nodes: TreeNode[]): Promise<void> => {
       for (const n of nodes) {
@@ -136,8 +150,8 @@ const flatTree = computed(() => {
   return out
 })
 
-// 会话切换：清空展开状态重载
-watch(cid, () => { expandedPaths.clear(); rebuild() }, { immediate: true })
+// 会话切换：清空展开状态重载（首次加载启用「根目录 <5 项自动展开下一层」）
+watch(cid, () => { expandedPaths.clear(); rebuild(true) }, { immediate: true })
 // 工具创建文件 / 会话完成：刷新文件树（保留展开状态）
 watch(() => state.filesTick, () => { rebuild() })
 </script>
@@ -149,7 +163,7 @@ watch(() => state.filesTick, () => { rebuild() })
         <FolderClosed :size="14" /> 会话工作目录
         <span v-if="loading" class="muted">加载中…</span>
       </span>
-      <NButton quaternary circle size="small" title="刷新文件列表" @click="rebuild">
+      <NButton quaternary circle size="small" title="刷新文件列表" @click="rebuild()">
         <template #icon><RotateCw :size="15" /></template>
       </NButton>
     </div>

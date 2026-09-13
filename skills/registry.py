@@ -11,7 +11,8 @@ from skills.base import Skill
 from skills import builtin as builtin_pkg
 
 # 默认启用的内置技能
-DEFAULT_ENABLED = {"system", "math", "web", "coder", "file"}
+DEFAULT_ENABLED = {"system", "math", "web", "coder", "file",
+                   "viz", "db", "audio", "image", "doc", "rag"}
 
 
 class SkillRegistry:

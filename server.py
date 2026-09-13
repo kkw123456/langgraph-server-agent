@@ -30,7 +30,7 @@ import workspace
 # 确认模式下等待用户决策的最长等待时间（秒），超时视为全部拒绝
 MODE_TIMEOUT = 600
 
-# 顶部工具栏可切换的模型（值需与所选服务商的模型名一致）
+# 顶部工具栏可切换的模型：默认表，用户可在「设置」中扩展（持久化到 data/models.json）
 ALLOWED_MODELS = [
     "ark-code-latest",
     "deepseek-chat",
@@ -38,6 +38,24 @@ ALLOWED_MODELS = [
     "gpt-4o-mini",
     "gpt-4o",
 ]
+_MODELS_PATH = os.path.join(config.DATA_DIR, "models.json")
+
+
+def _load_models() -> list[str]:
+    """读取用户扩展后的模型表；文件不存在或为空时用默认表。"""
+    try:
+        with open(_MODELS_PATH) as f:
+            arr = json.load(f)
+        if isinstance(arr, list) and arr:
+            return [str(x) for x in arr if str(x).strip()]
+    except Exception:
+        pass
+    return list(ALLOWED_MODELS)
+
+
+def _save_models(models: list[str]) -> None:
+    with open(_MODELS_PATH, "w") as f:
+        json.dump(models, f, ensure_ascii=False, indent=2)
 
 # ---- 全局单例 ----
 registry = SkillRegistry(config.DATA_DIR)
@@ -61,11 +79,19 @@ def _is_logged_in(request: Request) -> bool:
 
 
 async def require_auth(request: Request):
-    """REST 接口依赖：未登录返回 401。认证关闭时直接放行。"""
+    """REST 接口依赖：未登录返回 401；已登录把用户名写入 request.state.user。"""
     if not authmod.enabled():
+        request.state.user = ""
         return None
-    if not _is_logged_in(request):
+    user = authmod.verify_session(request.cookies.get(authmod.COOKIE_NAME))
+    if user is None:
         raise _Unauthorized()
+    request.state.user = user
+
+
+def _current_user(request: Request) -> str:
+    """取当前登录用户名（认证关闭时为空串，等价于不过滤）。"""
+    return getattr(request.state, "user", "") or ""
 
 
 class _Unauthorized(Exception):
@@ -130,18 +156,21 @@ RUNS: dict[str, RunHandle] = {}
 MODES: dict[str, str] = {}
 
 
-def _start_run(cid: str, content: str) -> RunHandle:
-    """创建并启动一轮后台对话（WebSocket 消息、自动化触发共用）。"""
+def _start_run(cid: str, content: str, attachments: list | None = None) -> RunHandle:
+    """创建并启动一轮后台对话（WebSocket 消息、自动化触发共用）。
+
+    attachments: 用户消息携带的附件清单 [{path,name,size}]，随消息落库与回显。
+    """
     run = RunHandle(cid, MODES.get(cid, "auto"))
     RUNS[cid] = run
-    run.task = asyncio.create_task(_run_wrapped(cid, content, run))
+    run.task = asyncio.create_task(_run_wrapped(cid, content, run, attachments))
     return run
 
 
-async def _run_wrapped(cid: str, content: str, run: RunHandle):
+async def _run_wrapped(cid: str, content: str, run: RunHandle, attachments: list | None = None):
     """run_turn 的外层包装：负责收尾（done 标记、注册表清理、兜底事件）。"""
     try:
-        await run_turn(cid, content, run)
+        await run_turn(cid, content, run, attachments)
     except asyncio.CancelledError:
         # run_turn 内部已尽力保存进度；这里兜底补发结束事件，防止前端空等
         try:
@@ -519,7 +548,7 @@ def api_runtime():
     return {
         "model": agent_manager.model_name if agent_manager else config.MODEL,
         "base_url": config.OPENAI_BASE_URL,
-        "models": ALLOWED_MODELS,
+        "models": _load_models(),
         "temperature": config.TEMPERATURE,
         "skills_total": len(skills),
         "skills_enabled": sum(1 for s in skills if s.get("enabled")),
@@ -536,18 +565,55 @@ async def api_set_model(body: dict):
     name = (body.get("model") or "").strip()
     if not name:
         return {"ok": False, "error": "模型名不能为空"}
-    if ALLOWED_MODELS and name not in ALLOWED_MODELS:
-        return {"ok": False, "error": f"不支持的模型：{name}"}
+    if name not in _load_models():
+        return {"ok": False, "error": f"模型 {name} 不在可用列表中，请先添加"}
     if agent_manager is None:
         return {"ok": False, "error": "Agent 尚未初始化"}
     agent_manager.set_model(name)
     return {"ok": True, "model": name}
 
 
-# ===================== 会话管理 =====================
+@app.post("/api/runtime/models", dependencies=[Depends(require_auth)])
+async def api_add_model(body: dict):
+    """向可用模型表添加一个模型名（OpenAI 兼容模型名，持久化保存）。"""
+    name = (body.get("name") or body.get("model") or "").strip()
+    if not name:
+        return {"ok": False, "error": "模型名不能为空"}
+    if len(name) > 120 or any(ch in name for ch in " \t\r\n"):
+        return {"ok": False, "error": "模型名不合法（不得含空白，≤120 字符）"}
+    models = _load_models()
+    if name in models:
+        return {"ok": False, "error": "模型已存在"}
+    models.append(name)
+    _save_models(models)
+    return {"ok": True, "models": models}
+
+
+@app.delete("/api/runtime/models/{name}", dependencies=[Depends(require_auth)])
+def api_del_model(name: str):
+    models = _load_models()
+    if name not in models:
+        return {"ok": False, "error": "模型不存在"}
+    models.remove(name)
+    _save_models(models)
+    # 删除的是当前模型时回退到表中第一个
+    if agent_manager and agent_manager.model_name == name and models:
+        agent_manager.set_model(models[0])
+    return {"ok": True, "models": models, "model": agent_manager.model_name if agent_manager else None}
+
+
+# ===================== 会话管理（会话归属当前用户） =====================
+def _conv_owned(meta: dict | None, user: str) -> bool:
+    """会话可见性：owner 为空的旧会话对所有人可见；否则仅归属用户可见。"""
+    if not meta:
+        return False
+    owner = meta.get("owner") or ""
+    return not owner or not user or owner == user
+
+
 @app.get("/api/conversations", dependencies=[Depends(require_auth)])
-def api_conv_list():
-    items = store.list()
+def api_conv_list(request: Request):
+    items = store.list(owner=_current_user(request) or None)
     for c in items:
         r = RUNS.get(c["id"])
         c["running"] = bool(r and not r.done)  # 会话列表「运行中」徽标
@@ -555,29 +621,33 @@ def api_conv_list():
 
 
 @app.post("/api/conversations", dependencies=[Depends(require_auth)])
-async def api_conv_create(body: dict = None):
+async def api_conv_create(request: Request, body: dict = None):
     title = (body or {}).get("title", "新对话")
-    conv = store.create(title)
+    conv = store.create(title, owner=_current_user(request))
     workspace.get_workspace(conv["id"])  # 预建该会话隔离的工作目录
     return conv
 
 
 @app.get("/api/conversations/{cid}", dependencies=[Depends(require_auth)])
-def api_conv_get(cid: str):
+def api_conv_get(request: Request, cid: str):
     meta = store.get(cid)
-    if not meta:
+    if not _conv_owned(meta, _current_user(request)):
         return {"ok": False, "error": "not found"}
     return {"ok": True, "meta": meta, "messages": store.load_messages(cid)}
 
 
 @app.delete("/api/conversations/{cid}", dependencies=[Depends(require_auth)])
-def api_conv_delete(cid: str):
+def api_conv_delete(request: Request, cid: str):
+    if not _conv_owned(store.get(cid), _current_user(request)):
+        return {"ok": False, "error": "not found"}
     store.delete(cid)
     return {"ok": True}
 
 
 @app.patch("/api/conversations/{cid}", dependencies=[Depends(require_auth)])
-async def api_conv_rename(cid: str, body: dict):
+async def api_conv_rename(request: Request, cid: str, body: dict):
+    if not _conv_owned(store.get(cid), _current_user(request)):
+        return {"ok": False, "error": "not found"}
     store.rename(cid, body.get("title", "新对话"))
     return {"ok": True}
 
@@ -724,12 +794,18 @@ async def api_files_upload(cid: str, body: dict):
 
 # ===================== 对话（非流式回退） =====================
 @app.post("/api/conversations/{cid}/messages", dependencies=[Depends(require_auth)])
-async def api_send(cid: str, body: dict):
+async def api_send(request: Request, cid: str, body: dict):
+    if not _conv_owned(store.get(cid), _current_user(request)):
+        return JSONResponse({"ok": False, "error": "会话不存在"}, status_code=404)
     r = RUNS.get(cid)
     if r and not r.done:
         return JSONResponse({"ok": False, "error": "会话正在运行中"}, status_code=409)
     content = body.get("content", "")
-    result = await run_turn(cid, content, None)
+    atts = [
+        {"path": str(a.get("path", "")), "name": str(a.get("name", "")), "size": int(a.get("size") or 0)}
+        for a in (body.get("attachments") or []) if isinstance(a, dict) and a.get("path")
+    ]
+    result = await run_turn(cid, content, None, atts)
     return {"ok": True, "assistant": result["assistant"]}
 
 
@@ -748,15 +824,18 @@ async def api_conv_stop(cid: str):
 async def ws_endpoint(websocket: WebSocket, cid: str):
     await websocket.accept()
     # WebSocket 无法用 HTTP 依赖，此处手工校验会话 Cookie
+    user = ""
     if authmod.enabled():
         token = websocket.cookies.get(authmod.COOKIE_NAME)
-        if authmod.verify_session(token) is None:
+        user = authmod.verify_session(token) or ""
+        if not user:
             await websocket.send_json(
                 {"type": "error", "content": "未登录", "code": "unauthorized"}
             )
             await websocket.close(code=4401)
             return
-    if not store.get(cid):
+    meta = store.get(cid)
+    if not meta or not _conv_owned(meta, user):
         await websocket.send_json({"type": "error", "content": "会话不存在"})
         await websocket.close()
         return
@@ -781,7 +860,12 @@ async def ws_endpoint(websocket: WebSocket, cid: str):
                         {"type": "warn", "content": "当前会话正在回复中，请等待完成或先停止。"}
                     )
                     continue
-                run = _start_run(cid, data.get("content", ""))
+                atts = data.get("attachments") or []
+                atts = [
+                    {"path": str(a.get("path", "")), "name": str(a.get("name", "")), "size": int(a.get("size") or 0)}
+                    for a in atts if isinstance(a, dict) and a.get("path")
+                ]
+                run = _start_run(cid, data.get("content", ""), atts)
                 run.subscribe(websocket)
                 # 注意：此处不 await run_turn，接收循环继续运行，
                 # 以便在「确认模式」下收到客户端的 tool_decision / cancel 消息。
@@ -815,20 +899,24 @@ async def ws_endpoint(websocket: WebSocket, cid: str):
             r.unsubscribe(websocket)
 
 
-async def run_turn(cid: str, content: str, run: RunHandle | None):
+async def run_turn(cid: str, content: str, run: RunHandle | None, attachments: list | None = None):
     """执行一轮对话。
 
     run 为 None 时走非流式（REST 回退），强制为自动模式且不推送事件。
     在「确认模式」下，工具调用会在执行前被中断并推送 tool_confirm 事件，
     等待客户端决策（approve / deny / cancel）后通过 Command(resume) 继续。
     所有事件经 RunHandle.emit 广播：多端可同时订阅，断线重连可回放续看。
+    attachments 为用户消息的附件清单，随消息落库供前端回显。
     """
     mode = run.mode if run else "auto"
     token = workspace.current_workspace.set(workspace.get_workspace(cid))
     cancelled = False
     try:
         messages = store.load_messages(cid)
-        messages.append({"role": "user", "content": content})
+        user_msg: dict = {"role": "user", "content": content}
+        if attachments:
+            user_msg["attachments"] = attachments
+        messages.append(user_msg)
         assistant = {"role": "assistant", "content": "", "tool_calls": []}
 
         try:
@@ -843,6 +931,9 @@ async def run_turn(cid: str, content: str, run: RunHandle | None):
             await run.emit({"type": "message_start"})
 
         config = {"configurable": {"thread_id": cid}}
+        # run_id -> tool_call 映射：并行工具调用时把 on_tool_end 的输出精确归属到
+        # 对应的调用上（end 事件到达顺序可能与 start 不同，不能简单取「最后一个」）
+        tool_by_run: dict = {}
         # 首轮输入为用户消息；后续轮次为中断后的 resume 续跑。Agent 已开启
         # interrupt_before=["tools"]，因此每一次工具调用前都会在此循环中被拦截。
         first = True
@@ -876,13 +967,26 @@ async def run_turn(cid: str, content: str, run: RunHandle | None):
                             "at": len(assistant["content"]),
                         }
                         assistant["tool_calls"].append(tc)
+                        rid = event.get("run_id")
+                        if rid:
+                            tool_by_run[rid] = tc
                         if run:
                             await run.emit({"type": "tool_start", "name": tc["name"], "input": tc["input"], "at": tc["at"]})
                     elif kind == "on_tool_end":
                         out = _safe_str(event["data"].get("output"))
-                        _attach_output(assistant, out)
+                        rid = event.get("run_id")
+                        tc = tool_by_run.get(rid)
+                        if tc is not None:
+                            tc["output"] = out
+                        else:
+                            _attach_output(assistant, out)
                         if run:
-                            await run.emit({"type": "tool_end", "output": out[:3000]})
+                            await run.emit({
+                                "type": "tool_end",
+                                "output": out[:3000],
+                                "name": (tc or {}).get("name", ""),
+                                "at": (tc or {}).get("at"),
+                            })
             except GraphInterrupt:
                 interrupted = True
             except asyncio.CancelledError:

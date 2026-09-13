@@ -1,14 +1,14 @@
 <script setup lang="ts">
 // 设置页：展示运行时信息（模型、推理服务地址、技能与会话统计），
 // 提供模型切换、工具权限模式切换、退出登录。
-import { onMounted } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
-  NCard, NRadioGroup, NRadioButton, NSelect, NButton, NTag, useMessage, useDialog,
+  NCard, NRadioGroup, NRadioButton, NSelect, NButton, NTag, NInput, useMessage, useDialog,
 } from 'naive-ui'
-import { Settings, LogOut, RefreshCw, Cpu, ShieldCheck, Database } from 'lucide-vue-next'
+import { Settings, LogOut, RefreshCw, Cpu, ShieldCheck, Database, Check, X } from 'lucide-vue-next'
 import { state, setMode } from '../store'
-import { wb, loadRuntime, setModel } from '../workbench'
+import { wb, loadRuntime, setModel, addModel, removeModel } from '../workbench'
 import { authState, logout as doLogout } from '../auth'
 import { api } from '../api'
 import { computed } from 'vue'
@@ -23,6 +23,35 @@ const modelOptions = computed(() =>
 
 async function onModel(v: string): Promise<void> {
   if (v && v !== wb.runtime.model) await setModel(v)
+}
+
+// ===================== 模型管理：添加 / 设为当前 / 删除 =====================
+const newModel = ref('')
+const adding = ref(false)
+async function onAddModel(): Promise<void> {
+  const name = newModel.value.trim()
+  if (!name) {
+    message.warning('请输入模型名称')
+    return
+  }
+  adding.value = true
+  try {
+    const ok = await addModel(name)
+    if (ok) newModel.value = ''
+  } finally {
+    adding.value = false
+  }
+}
+function onRemoveModel(m: string): void {
+  dialog.warning({
+    title: '删除模型',
+    content: `确定从模型列表删除 ${m} 吗？`,
+    positiveText: '删除',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      await removeModel(m)
+    },
+  })
 }
 
 async function refresh(): Promise<void> {
@@ -76,6 +105,57 @@ onMounted(loadRuntime)
                   placeholder="选择模型"
                   @update:value="onModel"
                 />
+              </span>
+            </div>
+            <div class="set-row set-row-top">
+              <span class="set-label">添加模型</span>
+              <span class="set-val set-val-inline">
+                <NInput
+                  v-model:value="newModel"
+                  class="set-model-input"
+                  size="small"
+                  placeholder="输入模型名称，如 gpt-4o-mini"
+                  :disabled="adding"
+                  clearable
+                  @keyup.enter="onAddModel"
+                />
+                <NButton size="small" type="primary" secondary :loading="adding" @click="onAddModel">
+                  添加
+                </NButton>
+              </span>
+            </div>
+            <div class="set-row set-row-top">
+              <span class="set-label">模型列表（{{ wb.runtime.models.length }}）</span>
+              <span class="set-val set-model-list">
+                <span
+                  v-for="m in wb.runtime.models"
+                  :key="m"
+                  class="set-model-chip"
+                  :class="{ current: m === wb.runtime.model }"
+                >
+                  <span class="set-model-name">{{ m }}</span>
+                  <NTag v-if="m === wb.runtime.model" size="tiny" type="success" :bordered="false">当前</NTag>
+                  <NButton
+                    quaternary
+                    circle
+                    size="tiny"
+                    class="set-model-btn"
+                    title="设为当前"
+                    @click="onModel(m)"
+                  >
+                    <template #icon><Check :size="13" /></template>
+                  </NButton>
+                  <NButton
+                    quaternary
+                    circle
+                    size="tiny"
+                    class="set-model-btn"
+                    title="删除"
+                    @click="onRemoveModel(m)"
+                  >
+                    <template #icon><X :size="13" /></template>
+                  </NButton>
+                </span>
               </span>
             </div>
             <div class="set-row">

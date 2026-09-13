@@ -6,7 +6,7 @@ import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   NCard, NButton, NModal, NForm, NFormItem, NInput, NSelect, NSwitch, NTimePicker,
-  NEmpty, NPopconfirm, NTag, useMessage,
+  NEmpty, NPopconfirm, NTag, NSkeleton, useMessage,
 } from 'naive-ui'
 import { Clock, Plus, Pencil, Trash2, Play, Zap } from 'lucide-vue-next'
 import { selectConv, loadConvs } from '../store'
@@ -136,8 +136,17 @@ onBeforeUnmount(() => { if (timer) window.clearInterval(timer) })
     </div>
 
     <div class="page-body">
+      <!-- 首载骨架屏 -->
+      <div v-if="wb.loadingAutomations" class="grid-cards">
+        <NCard v-for="i in 3" :key="'sk' + i" size="small">
+          <NSkeleton text width="38%" class="sk-title" />
+          <NSkeleton text :repeat="2" />
+          <NSkeleton text width="60%" class="sk-line" />
+        </NCard>
+      </div>
+
       <NEmpty
-        v-if="!wb.automations.length"
+        v-else-if="!wb.automations.length"
         class="page-empty"
         description="还没有自动化任务，创建一个让智能体按时替你跑"
       />

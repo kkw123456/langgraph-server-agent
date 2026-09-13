@@ -4,12 +4,32 @@ import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { NAvatar } from 'naive-ui'
 import {
-  Bot, BrainCircuit, Braces, Check, Code2, FileOutput, FilePlus2, FileText, FolderClosed,
+  Bot, BrainCircuit, Braces, Check, Code2, Eye, File as FileIco, FileOutput, FilePlus2, FileText, FolderClosed,
   Globe, Loader2, Table2, Terminal, UserRound, Wrench,
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
 import type { Message, ToolCall } from '../types'
 import { toolLabel } from '../utils/toolLabels'
+import { state } from '../store'
+import { api } from '../api'
+
+// 点击消息附件卡片 → 冒泡给 ChatWindow/Home 打开右侧面板预览工作目录文件
+const emit = defineEmits<{ 'open-file': [path: string] }>()
+
+/** 附件视图模型：剥离正文里的附件提示行后剩余的正文 + 附件清单 */
+const ATTACH_LINE = /\n*\[附件已上传至工作目录：[^\]]*\]\n*/g
+const userText = computed(() =>
+  props.msg.role === 'user' ? (props.msg.content || '').replace(ATTACH_LINE, '').trim() : (props.msg.content || ''),
+)
+
+/** markdown 里的相对图片（tmp/…）映射为文件流 URL，聊天内直接回显 */
+function withLocalImages(html: string): string {
+  const cid = state.current
+  if (!cid) return html
+  return html.replace(/(src)="(tmp\/[^"]+)"/g, (_, a, p) =>
+    `${a}="${api.rawFileUrl(cid, p)}"`,
+  )
+}
 
 marked.setOptions({ gfm: true, breaks: true })
 
@@ -24,7 +44,7 @@ DOMPurify.addHook('afterSanitizeAttributes', (node) => {
 const props = defineProps<{ msg: Message; streaming?: boolean }>()
 
 // Markdown 渲染（先 sanitize 再注入，防 XSS）
-const html = computed(() => DOMPurify.sanitize(marked.parse(props.msg.content || '', { async: false })))
+const html = computed(() => withLocalImages(DOMPurify.sanitize(marked.parse(props.msg.content || '', { async: false }))))
 
 // ---- 思考过程折叠：流式输出中默认展开，历史消息默认收起 ----
 const hasThinking = computed(() => !!(props.msg.reasoning || '').trim())
@@ -120,6 +140,12 @@ function toggle(segIdx: number, ti: number): void {
   expanded.value = next
 }
 
+function fmtAttachSize(n: number): string {
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+  return `${(n / 1024 / 1024).toFixed(1)} MB`
+}
+
 function truncate(s: string, n = 110): string {
   s = String(s || '').replace(/\s+/g, ' ').trim()
   return s.length > n ? s.slice(0, n) + '…' : s
@@ -138,7 +164,24 @@ function truncate(s: string, n = 110): string {
     </NAvatar>
     <div class="bubble">
       <template v-if="msg.role === 'user'">
-        <span class="user-text">{{ msg.content }}</span>
+        <span v-if="userText" class="user-text">{{ userText }}</span>
+        <!-- 附件卡片：点击在右侧面板打开工作目录中的原文件 -->
+        <div v-if="msg.attachments?.length" class="msg-attach">
+          <span
+            v-for="a in msg.attachments"
+            :key="a.path"
+            class="ma-card"
+            :title="a.path"
+            @click="emit('open-file', a.path)"
+          >
+            <FileIco :size="14" class="ma-ico" />
+            <span class="ma-main">
+              <span class="ma-name">{{ a.name }}</span>
+              <span class="ma-meta">{{ fmtAttachSize(a.size) }} · 点击查看</span>
+            </span>
+            <Eye :size="13" class="ma-eye" />
+          </span>
+        </div>
       </template>
       <template v-else>
         <!-- 思考过程（deepseek/ark 等模型的 reasoning_content） -->
@@ -153,7 +196,7 @@ function truncate(s: string, n = 110): string {
 
         <!-- 按发生顺序交错渲染：文本段 / 工具组段 -->
         <template v-for="(seg, si) in segments" :key="si">
-          <div v-if="seg.kind === 'text'" class="md seg-text" v-html="DOMPurify.sanitize(marked.parse(seg.text, { async: false }))"></div>
+          <div v-if="seg.kind === 'text'" class="md seg-text" v-html="withLocalImages(DOMPurify.sanitize(marked.parse(seg.text, { async: false })))"></div>
           <div v-else class="tool-nodes">
             <div
               v-for="(tc, ti) in seg.calls"

@@ -9,8 +9,7 @@
 //   页面切换由底部菜单承载（项目 / 专家·技能·连接器 / 自动化 / 资料库 / 灵感）。
 import { computed, onMounted, onBeforeUnmount, watch, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { NAvatar, NDropdown, useMessage, useDialog } from 'naive-ui'
-import type { DropdownOption } from 'naive-ui'
+import { useMessage, useDialog } from 'naive-ui'
 import {
   BookMarked, Clock, Lightbulb,
   MessageSquare, Puzzle,
@@ -18,7 +17,7 @@ import {
 import type { Component } from 'vue'
 import { state, newChat, selectConv, deleteConv, renameConv, filteredConvs, closeWs } from '../store'
 import { loadRuntime } from '../workbench'
-import { authState, logout as doLogout } from '../auth'
+import { logout as doLogout } from '../auth'
 import { useBreakpoint } from '../composables/useBreakpoint'
 import ConversationSidebar from '../components/ConversationSidebar.vue'
 
@@ -32,6 +31,8 @@ const bp = useBreakpoint()
 const sidebarCollapsed = ref(false)
 // 移动端抽屉由全局 store 驱动（聊天区顶栏的列表按钮触发）
 const overlay = computed(() => bp.isXs)
+// 右侧结果面板仅在对话页出现（Home 接收 show-right 决定是否渲染）
+const showRight = computed(() => route.path === '/')
 // 是否渲染侧栏：桌面常驻；移动端仅在抽屉打开时渲染
 const sidebarVisible = computed(() => (overlay.value ? state.sidebarOpen : true))
 // 桌面收起宽度与展开宽度一致沿用 --sidebar-w / 56px rail
@@ -127,13 +128,6 @@ function onTab(path: string): void {
   if (route.path !== path) router.push(path)
 }
 
-// ===================== 兜底用户入口（桌面侧栏 footer 已有，这里供移动端抽屉） =====================
-const userOptions: DropdownOption[] = [
-  { label: '设置', key: 'settings' },
-  { label: '退出登录', key: 'logout' },
-]
-const uname = computed(() => authState.username || 'admin')
-
 // 登录态失效：api.ts 在收到 401 时广播该事件
 function onUnauthorized(): void {
   message.warning('登录状态已失效，请重新登录')
@@ -175,11 +169,13 @@ onBeforeUnmount(() => {
 
       <!-- 列 2：内容区（首页聊天 / 各功能页） -->
       <main class="content">
-        <RouterView />
+        <RouterView v-slot="{ Component }">
+          <component :is="Component" :show-right="showRight" />
+        </RouterView>
       </main>
     </div>
 
-    <!-- 移动端底部菜单：项目（当前会话）/ 专家·技能·连接器 / 自动化 / 资料库 / 灵感 -->
+    <!-- 移动端底部菜单：项目（当前会话）/ 专家·技能·连接器 / 自动化 / 资料库 / 灵感（用户入口在抽屉底部） -->
     <nav class="tabbar">
       <span
         v-for="t in tabItems"
@@ -191,12 +187,6 @@ onBeforeUnmount(() => {
         <component :is="t.icon" :size="19" class="tab-ico" />
         <span class="tab-label">{{ t.label }}</span>
       </span>
-      <!-- 抽屉外的用户入口：设置 / 退出 -->
-      <NDropdown trigger="click" placement="top-end" :options="userOptions" @select="onNav">
-        <span class="tab-item tab-user">
-          <NAvatar round :size="22" class="tab-avatar">{{ uname.slice(0, 1).toUpperCase() }}</NAvatar>
-        </span>
-      </NDropdown>
     </nav>
   </div>
 </template>
@@ -285,12 +275,5 @@ onBeforeUnmount(() => {
     &.active { color: var(--accent); }
     &.active .tab-ico { color: var(--accent); }
   }
-  .tab-user {
-    flex: 0 0 52px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-  .tab-avatar { background: var(--accent-grad); color: #fff; font-size: 12px; }
 }
 </style>

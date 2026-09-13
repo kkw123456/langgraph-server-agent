@@ -5,7 +5,7 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   NCard, NButton, NModal, NForm, NFormItem, NInput, NSelect, NEmpty, NPopconfirm,
-  NTag, NInputGroup, useMessage,
+  NTag, NInputGroup, NSkeleton, useMessage,
 } from 'naive-ui'
 import { BookMarked, Plus, Pencil, Trash2, Search, Send, Link2, FileText, StickyNote } from 'lucide-vue-next'
 import { startWith } from '../store'
@@ -116,8 +116,16 @@ onMounted(() => loadLibrary())
         <NButton v-if="kw" quaternary @click="kw = ''; loadLibrary()">清空</NButton>
       </div>
 
+      <!-- 首载骨架屏 -->
+      <div v-if="wb.loadingLibrary" class="lib-list">
+        <NCard v-for="i in 3" :key="'sk' + i" size="small">
+          <NSkeleton text width="30%" class="sk-title" />
+          <NSkeleton text :repeat="3" />
+        </NCard>
+      </div>
+
       <NEmpty
-        v-if="!wb.library.length"
+        v-else-if="!wb.library.length"
         class="page-empty"
         description="资料库还是空的，把常用资料存进来，随时带进对话"
       />

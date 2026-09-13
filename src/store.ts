@@ -141,9 +141,16 @@ function applyEvent(msg: WsEvent): void {
       state.waiting = false
       break
     case 'tool_end':
-      if (state.live && state.live.tool_calls!.length) {
-        const last = state.live.tool_calls![state.live.tool_calls!.length - 1]
-        last.output = msg.output
+      // 按 name+at 精确匹配（并行工具 end 乱序到达时不串位）；匹配不到回退最后一个
+      {
+        const calls = state.live?.tool_calls
+        const target =
+          calls?.find((t) => (msg.name ? t.name === msg.name : true) && msg.at !== undefined && t.at === msg.at && t.output === '执行中…')
+          ?? (calls && msg.name
+            ? calls.find((t) => t.name === msg.name && t.output === '执行中…')
+            : undefined)
+          ?? (calls && calls.length ? calls[calls.length - 1] : undefined)
+        if (target) target.output = msg.output
       }
       // 创建文件类工具结束：文件树可能变化
       if (FILE_TOOLS.has(lastToolName)) state.filesTick++
@@ -290,18 +297,18 @@ export async function sendText(text: string, files?: File[]): Promise<void> {
     // 等连接握手完成再发消息：保证第一条消息也走 WS 流式（否则落 REST 兜底，无流式与事件）
     await waitWsOpen()
   }
-  // 附件上传：进入会话工作目录，成功后把文件清单附进消息正文，让 Agent 知道去哪找
+  // 附件上传：进入会话工作目录；正文附一行 agent 可读的提示，附件清单随消息结构化传递
   let body = t
+  const attachments: { path: string; name: string; size: number }[] = []
   if (files && files.length && state.current) {
-    const saved: string[] = []
     for (const f of files) {
       try {
         const data = await fileToBase64(f)
-        const r = await api.uploadFiles<{ ok: boolean; saved?: { path: string; size: number }[]; error?: string }>(
+        const r = await api.uploadFiles<{ ok: boolean; saved?: { path: string; name: string; size: number }[]; error?: string }>(
           state.current, [{ name: f.name, data }],
         )
         if (r.ok && r.saved?.length) {
-          saved.push(...r.saved.map((s) => `${s.path} (${fmtSize(s.size)})`))
+          attachments.push(...r.saved)
         } else {
           toast.error(`${f.name} 上传失败: ${r.error || '未知错误'}`)
         }
@@ -309,20 +316,21 @@ export async function sendText(text: string, files?: File[]): Promise<void> {
         toast.error(`${f.name} 读取失败`)
       }
     }
-    if (saved.length) {
+    if (attachments.length) {
       state.filesTick++ // 上传完成：文件树刷新
-      body = (body ? body + '\n\n' : '') + `[已上传附件到工作目录：${saved.join('、')}，可直接读取]`
+      const list = attachments.map((s) => `${s.path} (${fmtSize(s.size)})`).join('、')
+      body = (body ? body + '\n\n' : '') + `[附件已上传至工作目录：${list}，可直接读取]`
     }
   }
-  if (!body.trim()) return
-  state.messages.push({ role: 'user', content: body })
+  if (!body.trim() && !attachments.length) return
+  state.messages.push({ role: 'user', content: body, attachments: attachments.length ? attachments : undefined })
   if (ws && ws.readyState === 1) {
     state.waiting = true // 等待模型开始回复，聊天区显示 loading
     state.running = true
     setConvRunning(state.current, true) // 乐观标记：侧栏会话项立即转圈
-    ws.send(JSON.stringify({ type: 'message', content: body }))
+    ws.send(JSON.stringify({ type: 'message', content: body, attachments }))
   } else {
-    await api.post(`/api/conversations/${state.current}/messages`, { content: body })
+    await api.post(`/api/conversations/${state.current}/messages`, { content: body, attachments })
     const d = await api.get<{ messages?: Message[] }>(`/api/conversations/${state.current}`)
     state.messages = d.messages ?? []
     state.waiting = false

@@ -11,8 +11,8 @@ import { useRoute, useRouter } from 'vue-router'
 import { NAvatar, NButton, NDropdown, NEmpty, NInput, useDialog } from 'naive-ui'
 import type { DropdownOption } from 'naive-ui'
 import {
-  Bell, BookMarked, Bot, Clock, FolderClosed, Lightbulb, Loader2, MessageSquare, MoreHorizontal,
-  PanelLeftClose, PanelLeftOpen, Plus, Puzzle, Search, Settings, Wand2,
+  Bell, BookMarked, Bot, Clock, Lightbulb, Loader2, MessageSquare, MoreHorizontal,
+  PanelLeftClose, PanelLeftOpen, Plus, Puzzle, Search,
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
 import type { Conversation } from '../types'
@@ -85,15 +85,13 @@ function relTime(ts?: number): string {
 
 // ===================== 菜单导航（平铺，无「更多」下拉） =====================
 interface NavItem { key: string; label: string; icon: Component; primary?: boolean }
+// PC 左侧菜单精简：不展示 新建技能 / 设置 / 项目（设置保留在底部用户菜单，项目移动端 header 提供）
 const navItems: NavItem[] = [
   { key: 'new', label: '新建任务', icon: Plus, primary: true },
-  { key: 'projects', label: '项目', icon: FolderClosed },
   { key: 'experts', label: '专家·技能·连接器', icon: Puzzle },
   { key: 'automation', label: '自动化', icon: Clock },
   { key: 'library', label: '资料库', icon: BookMarked },
   { key: 'inspiration', label: '灵感', icon: Lightbulb },
-  { key: 'skill-new', label: '新建技能', icon: Wand2 },
-  { key: 'settings', label: '设置', icon: Settings },
 ]
 // 当前路由对应的高亮项（与 Shell 的 activeKey 规则一致）
 const activeNav = computed(() => {
