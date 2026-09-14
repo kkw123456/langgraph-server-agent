@@ -143,6 +143,26 @@ const hlResult = computed(() => {
   }
 })
 const tabsEl = ref<HTMLElement | null>(null)
+// 预览容器 ref + 尺寸签名：Web Component(<flyfish-file-viewer>) 不响应父级 flex 尺寸变化，
+// 面板拖宽/全屏切换后内部 canvas 不重算导致「放大不自适应」。
+// 用 ResizeObserver 监听容器尺寸，变化时 bump viewerSig 触发 :key 重挂载重绘。
+const pvViewerEl = ref<HTMLElement | null>(null)
+const viewerSig = ref(0)
+let pvRo: ResizeObserver | null = null
+let pvLastSize = ''
+function observeViewer(): void {
+  pvRo?.disconnect()
+  const el = pvViewerEl.value
+  if (!el || typeof ResizeObserver === 'undefined') return
+  pvRo = new ResizeObserver(() => {
+    const size = `${Math.round(el.clientWidth)}x${Math.round(el.clientHeight)}`
+    if (size === pvLastSize) return
+    pvLastSize = size
+    // 等布局稳定后重挂载 viewer，避免 build 期间尺寸抖动
+    void nextTick(() => { viewerSig.value++ })
+  })
+  pvRo.observe(el)
+}
 // 文件标签栏：鼠标滚轮横向滚动（标签多时不挤爆面板）
 function onTabsWheel(e: WheelEvent): void {
   const el = tabsEl.value
@@ -396,6 +416,16 @@ function downloadUrl(path: string): string {
   return state.current ? api.rawFileUrl(state.current, path) : '#'
 }
 
+// 预览切换/二进制文件出现时（重新）挂载尺寸观察器，容器变化即重挂 viewer（#2）。
+watch(
+  () => [activeTabData.value?.path, activeTabData.value?.binary, fullscreen.value, panelWidth.value] as const,
+  () => {
+    pvLastSize = ''
+    void nextTick(observeViewer)
+  },
+  { immediate: true },
+)
+
 // 视口变化时的状态收敛：变窄后退出全屏、关抽屉
 watch(
   () => [bp.isMd, bp.isXs] as const,
@@ -436,6 +466,8 @@ onBeforeUnmount(() => {
   if (pollTimer) window.clearInterval(pollTimer)
   document.body.style.userSelect = ''
   window.removeEventListener('keydown', onKeydown)
+  pvRo?.disconnect()
+  pvRo = null
 })
 </script>
 
@@ -625,9 +657,9 @@ onBeforeUnmount(() => {
             <NSkeleton v-for="i in 7" :key="i" :width="i % 3 === 0 ? '62%' : i % 3 === 1 ? '92%' : '78%'" height="12px" :sharp="false" />
           </div>
           <template v-else-if="activeTabData">
-            <div v-if="activeTabData.binary" class="pv-viewer">
+            <div v-if="activeTabData.binary" ref="pvViewerEl" class="pv-viewer">
               <flyfish-file-viewer
-                :key="activeTabData.path"
+                :key="activeTabData.path + '#' + viewerSig"
                 :src="downloadUrl(activeTabData.path)"
                 :filename="activeTabData.name"
                 :options="{ toolbar: false }"

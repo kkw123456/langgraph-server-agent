@@ -614,7 +614,10 @@ body {
   &:hover { background: var(--hover); color: var(--text); }
   &.active { background: var(--accent-weak); color: var(--accent); }
 }
-.pv-tab-name { overflow: hidden; text-overflow: ellipsis; max-width: 128px; }
+/* 标签名不再硬截断（#1 修复）：默认按内容自适应宽度，仅设上限；
+   hover/激活时进一步放宽上限并加宽，长文件名不再「丢失」。 */
+.pv-tab-name { overflow: hidden; text-overflow: ellipsis; max-width: 220px; transition: max-width .15s ease; }
+.pv-tab:hover .pv-tab-name, .pv-tab.active .pv-tab-name { max-width: 420px; }
 .pv-tab-x { border-radius: 4px; flex: 0 0 auto; opacity: .6; &:hover { opacity: 1; background: rgba(0, 0, 0, .08); } }
 .rp-actions { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; margin-left: auto; }
 
@@ -633,8 +636,10 @@ body {
 /* 预览内容铺满容器（#1）：短文件时背景/高亮区也撑满整个预览区高度 */
 .pv-scroll .n-scrollbar-content { min-height: 100%; display: flex; flex-direction: column; }
 .pv-scroll .file-content, .pv-scroll .code-view { flex: 1; }
-.pv-viewer { flex: 1; min-height: 0; display: flex; }
-.pv-viewer flyfish-file-viewer { width: 100%; height: 100%; display: block; }
+.pv-viewer { flex: 1; min-height: 0; min-width: 0; height: 100%; display: flex; overflow: hidden; }
+/* 铺满修复（#2）：Web Component 依赖自身 100% 尺寸填充，父级 flex 尺寸变化时
+   需由 JS 触发重绘（见 Home.vue 的 ResizeObserver），此处保证 100% 撑满。 */
+.pv-viewer flyfish-file-viewer { width: 100%; height: 100%; display: block; min-width: 0; flex: 1 1 auto; }
 
 /* 代码高亮视图（#66）：行号列 sticky 左贴边，右上角语言标签 */
 .code-view {

@@ -1,1 +1,0 @@
-var e=e=>e===!1?{enabled:!1}:e===!0||e===void 0?{}:e,t=(e=``)=>({query:e,total:0,currentIndex:-1,current:null,matches:[]});export{e as n,t};

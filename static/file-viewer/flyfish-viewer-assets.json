@@ -2316,7 +2316,7 @@
     "missingOptional": []
   },
   "generatedBy": "@file-viewer/vite-plugin",
-  "copiedAt": "2026-09-13T14:26:08.201Z",
+  "copiedAt": "2026-09-14T08:12:11.402Z",
   "rendererIds": [
     "pdf",
     "ofd",
@@ -2356,7 +2356,7 @@
     {
       "rendererId": "chm",
       "id": "chm-worker",
-      "to": "/workspace/static/file-viewer/vendor/chm/chm.worker.js",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/chm/chm.worker.js",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2365,7 +2365,7 @@
     {
       "rendererId": "chm",
       "id": "chm-wasm-module",
-      "to": "/workspace/static/file-viewer/vendor/chm/chm_wasm.js",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/chm/chm_wasm.js",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2374,7 +2374,7 @@
     {
       "rendererId": "chm",
       "id": "chm-wasm",
-      "to": "/workspace/static/file-viewer/vendor/chm/chm_wasm_bg.wasm",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/chm/chm_wasm_bg.wasm",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2383,7 +2383,7 @@
     {
       "rendererId": "model",
       "id": "model-occt-worker",
-      "to": "/workspace/static/file-viewer/wasm/model/occt-worker.js",
+      "to": "/workspace/lg-work/static/file-viewer/wasm/model/occt-worker.js",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2392,7 +2392,7 @@
     {
       "rendererId": "model",
       "id": "model-occt-runtime",
-      "to": "/workspace/static/file-viewer/wasm/model/occt-import-js.js",
+      "to": "/workspace/lg-work/static/file-viewer/wasm/model/occt-import-js.js",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2401,7 +2401,7 @@
     {
       "rendererId": "model",
       "id": "model-occt-wasm",
-      "to": "/workspace/static/file-viewer/wasm/model/occt-import-js.wasm",
+      "to": "/workspace/lg-work/static/file-viewer/wasm/model/occt-import-js.wasm",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2410,7 +2410,7 @@
     {
       "rendererId": "model",
       "id": "model-occt-license",
-      "to": "/workspace/static/file-viewer/wasm/model/LICENSE.occt.txt",
+      "to": "/workspace/lg-work/static/file-viewer/wasm/model/LICENSE.occt.txt",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2419,7 +2419,7 @@
     {
       "rendererId": "model",
       "id": "model-occt-import-license",
-      "to": "/workspace/static/file-viewer/wasm/model/LICENSE.occt-import-js.txt",
+      "to": "/workspace/lg-work/static/file-viewer/wasm/model/LICENSE.occt-import-js.txt",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2428,7 +2428,7 @@
     {
       "rendererId": "drawing",
       "id": "drawio-viewer-script",
-      "to": "/workspace/static/file-viewer/vendor/drawio/viewer-static.min.js",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/drawio/viewer-static.min.js",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2437,7 +2437,7 @@
     {
       "rendererId": "drawing",
       "id": "drawio-offline-assets",
-      "to": "/workspace/static/file-viewer/vendor/drawio",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/drawio",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2446,7 +2446,7 @@
     {
       "rendererId": "pdf",
       "id": "pdf-worker",
-      "to": "/workspace/static/file-viewer/vendor/pdf/pdf.worker.mjs",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/pdf/pdf.worker.mjs",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2455,7 +2455,7 @@
     {
       "rendererId": "pdf",
       "id": "pdf-cmaps",
-      "to": "/workspace/static/file-viewer/vendor/pdf/cmaps",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/pdf/cmaps",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2464,7 +2464,7 @@
     {
       "rendererId": "pdf",
       "id": "pdf-wasm",
-      "to": "/workspace/static/file-viewer/vendor/pdf/wasm",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/pdf/wasm",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2473,7 +2473,7 @@
     {
       "rendererId": "pdf",
       "id": "pdf-standard-fonts",
-      "to": "/workspace/static/file-viewer/vendor/pdf/standard_fonts",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/pdf/standard_fonts",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2482,7 +2482,7 @@
     {
       "rendererId": "pdf",
       "id": "pdf-cjk-font-fallback",
-      "to": "/workspace/static/file-viewer/vendor/pdf/fonts",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/pdf/fonts",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2491,7 +2491,7 @@
     {
       "rendererId": "archive",
       "id": "libarchive-worker",
-      "to": "/workspace/static/file-viewer/vendor/libarchive/worker-bundle.js",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/libarchive/worker-bundle.js",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2500,7 +2500,7 @@
     {
       "rendererId": "archive",
       "id": "libarchive-wasm",
-      "to": "/workspace/static/file-viewer/vendor/libarchive/libarchive.wasm",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/libarchive/libarchive.wasm",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2509,7 +2509,7 @@
     {
       "rendererId": "cad",
       "id": "cad-wasm-directory",
-      "to": "/workspace/static/file-viewer/wasm/cad/0.8.2",
+      "to": "/workspace/lg-work/static/file-viewer/wasm/cad/0.8.2",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2518,7 +2518,7 @@
     {
       "rendererId": "cad",
       "id": "cad-dwg-worker",
-      "to": "/workspace/static/file-viewer/wasm/cad/0.8.2/dwg-worker.js",
+      "to": "/workspace/lg-work/static/file-viewer/wasm/cad/0.8.2/dwg-worker.js",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2527,7 +2527,7 @@
     {
       "rendererId": "cad",
       "id": "cad-dwf-wasm",
-      "to": "/workspace/static/file-viewer/wasm/cad/0.8.2/dwfv-render.wasm",
+      "to": "/workspace/lg-work/static/file-viewer/wasm/cad/0.8.2/dwfv-render.wasm",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2536,7 +2536,7 @@
     {
       "rendererId": "cad",
       "id": "cad-libredwg-script",
-      "to": "/workspace/static/file-viewer/wasm/cad/0.8.2/libredwg-web.js",
+      "to": "/workspace/lg-work/static/file-viewer/wasm/cad/0.8.2/libredwg-web.js",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2545,7 +2545,7 @@
     {
       "rendererId": "cad",
       "id": "cad-libredwg-wasm",
-      "to": "/workspace/static/file-viewer/wasm/cad/0.8.2/libredwg-web.wasm",
+      "to": "/workspace/lg-work/static/file-viewer/wasm/cad/0.8.2/libredwg-web.wasm",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2554,7 +2554,7 @@
     {
       "rendererId": "cad",
       "id": "cad-compat-0-8-0-wasm-directory",
-      "to": "/workspace/static/file-viewer/wasm/cad/0.8.0",
+      "to": "/workspace/lg-work/static/file-viewer/wasm/cad/0.8.0",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2563,7 +2563,7 @@
     {
       "rendererId": "cad",
       "id": "cad-compat-0-8-0-dwg-worker",
-      "to": "/workspace/static/file-viewer/wasm/cad/0.8.0/dwg-worker.js",
+      "to": "/workspace/lg-work/static/file-viewer/wasm/cad/0.8.0/dwg-worker.js",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2572,7 +2572,7 @@
     {
       "rendererId": "cad",
       "id": "cad-compat-0-8-0-dwf-wasm",
-      "to": "/workspace/static/file-viewer/wasm/cad/0.8.0/dwfv-render.wasm",
+      "to": "/workspace/lg-work/static/file-viewer/wasm/cad/0.8.0/dwfv-render.wasm",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2581,7 +2581,7 @@
     {
       "rendererId": "cad",
       "id": "cad-compat-0-8-0-libredwg-script",
-      "to": "/workspace/static/file-viewer/wasm/cad/0.8.0/libredwg-web.js",
+      "to": "/workspace/lg-work/static/file-viewer/wasm/cad/0.8.0/libredwg-web.js",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2590,7 +2590,7 @@
     {
       "rendererId": "cad",
       "id": "cad-compat-0-8-0-libredwg-wasm",
-      "to": "/workspace/static/file-viewer/wasm/cad/0.8.0/libredwg-web.wasm",
+      "to": "/workspace/lg-work/static/file-viewer/wasm/cad/0.8.0/libredwg-web.wasm",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2599,7 +2599,7 @@
     {
       "rendererId": "cad",
       "id": "cad-legacy-dwg-worker",
-      "to": "/workspace/static/file-viewer/wasm/cad/dwg-worker.js",
+      "to": "/workspace/lg-work/static/file-viewer/wasm/cad/dwg-worker.js",
       "copied": true,
       "required": false,
       "sourcePackage": "@file-viewer/web-full",
@@ -2608,7 +2608,7 @@
     {
       "rendererId": "cad",
       "id": "cad-legacy-dwf-wasm",
-      "to": "/workspace/static/file-viewer/wasm/cad/dwfv-render.wasm",
+      "to": "/workspace/lg-work/static/file-viewer/wasm/cad/dwfv-render.wasm",
       "copied": true,
       "required": false,
       "sourcePackage": "@file-viewer/web-full",
@@ -2617,7 +2617,7 @@
     {
       "rendererId": "cad",
       "id": "cad-legacy-libredwg-script",
-      "to": "/workspace/static/file-viewer/wasm/cad/libredwg-web.js",
+      "to": "/workspace/lg-work/static/file-viewer/wasm/cad/libredwg-web.js",
       "copied": true,
       "required": false,
       "sourcePackage": "@file-viewer/web-full",
@@ -2626,7 +2626,7 @@
     {
       "rendererId": "cad",
       "id": "cad-legacy-libredwg-wasm",
-      "to": "/workspace/static/file-viewer/wasm/cad/libredwg-web.wasm",
+      "to": "/workspace/lg-work/static/file-viewer/wasm/cad/libredwg-web.wasm",
       "copied": true,
       "required": false,
       "sourcePackage": "@file-viewer/web-full",
@@ -2635,7 +2635,7 @@
     {
       "rendererId": "office-word-openxml",
       "id": "docx-worker",
-      "to": "/workspace/static/file-viewer/vendor/docx/docx.worker.js",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/docx/docx.worker.js",
       "copied": true,
       "required": false,
       "sourcePackage": "@file-viewer/web-full",
@@ -2644,7 +2644,7 @@
     {
       "rendererId": "office-word-openxml",
       "id": "docx-worker-jszip",
-      "to": "/workspace/static/file-viewer/vendor/docx/jszip.min.js",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/docx/jszip.min.js",
       "copied": true,
       "required": false,
       "sourcePackage": "@file-viewer/web-full",
@@ -2653,7 +2653,7 @@
     {
       "rendererId": "office-presentation-binary",
       "id": "ppt-module",
-      "to": "/workspace/static/file-viewer/vendor/ppt/index.mjs",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/ppt/index.mjs",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2662,7 +2662,7 @@
     {
       "rendererId": "office-presentation-binary",
       "id": "ppt-worker",
-      "to": "/workspace/static/file-viewer/vendor/ppt/worker.mjs",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/ppt/worker.mjs",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2671,7 +2671,7 @@
     {
       "rendererId": "office-presentation-binary",
       "id": "ppt-frame-cache",
-      "to": "/workspace/static/file-viewer/vendor/ppt/frame-cache.mjs",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/ppt/frame-cache.mjs",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2680,7 +2680,7 @@
     {
       "rendererId": "office-presentation-binary",
       "id": "ppt-wasm",
-      "to": "/workspace/static/file-viewer/vendor/ppt/ppt-native.wasm",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/ppt/ppt-native.wasm",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2689,7 +2689,7 @@
     {
       "rendererId": "office-presentation-binary",
       "id": "ppt-cjk-font",
-      "to": "/workspace/static/file-viewer/vendor/ppt/ppt-font-cjk.otf",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/ppt/ppt-font-cjk.otf",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2698,7 +2698,7 @@
     {
       "rendererId": "office-presentation-binary",
       "id": "ppt-runtime-manifest",
-      "to": "/workspace/static/file-viewer/vendor/ppt/manifest.json",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/ppt/manifest.json",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2707,7 +2707,7 @@
     {
       "rendererId": "office-presentation-binary",
       "id": "ppt-runtime-package",
-      "to": "/workspace/static/file-viewer/vendor/ppt/package.json",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/ppt/package.json",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2716,7 +2716,7 @@
     {
       "rendererId": "office-presentation-binary",
       "id": "ppt-runtime-license",
-      "to": "/workspace/static/file-viewer/vendor/ppt/LICENSE",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/ppt/LICENSE",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2725,7 +2725,7 @@
     {
       "rendererId": "office-presentation-binary",
       "id": "ppt-runtime-notice",
-      "to": "/workspace/static/file-viewer/vendor/ppt/NOTICE",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/ppt/NOTICE",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2734,7 +2734,7 @@
     {
       "rendererId": "office-presentation",
       "id": "pptx-worker",
-      "to": "/workspace/static/file-viewer/vendor/pptx/pptx.worker.js",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/pptx/pptx.worker.js",
       "copied": true,
       "required": false,
       "sourcePackage": "@file-viewer/web-full",
@@ -2743,7 +2743,7 @@
     {
       "rendererId": "spreadsheet-openxml",
       "id": "spreadsheet-worker",
-      "to": "/workspace/static/file-viewer/vendor/xlsx/sheet.worker.js",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/xlsx/sheet.worker.js",
       "copied": true,
       "required": false,
       "sourcePackage": "@file-viewer/web-full",
@@ -2752,7 +2752,7 @@
     {
       "rendererId": "apple-pages",
       "id": "apple-pages-iwork-worker",
-      "to": "/workspace/static/file-viewer/vendor/iwork/iwork.worker.js",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/iwork/iwork.worker.js",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2761,7 +2761,7 @@
     {
       "rendererId": "apple-numbers",
       "id": "apple-numbers-iwork-worker",
-      "to": "/workspace/static/file-viewer/vendor/iwork/iwork.worker.js",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/iwork/iwork.worker.js",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2770,7 +2770,7 @@
     {
       "rendererId": "apple-keynote",
       "id": "apple-keynote-iwork-worker",
-      "to": "/workspace/static/file-viewer/vendor/iwork/iwork.worker.js",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/iwork/iwork.worker.js",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2779,7 +2779,7 @@
     {
       "rendererId": "office-hangul",
       "id": "hangul-worker",
-      "to": "/workspace/static/file-viewer/vendor/hangul/hangul.worker.js",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/hangul/hangul.worker.js",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2788,7 +2788,7 @@
     {
       "rendererId": "office-wordperfect",
       "id": "wordperfect-worker",
-      "to": "/workspace/static/file-viewer/vendor/wordperfect/wordperfect.worker.js",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/wordperfect/wordperfect.worker.js",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2797,7 +2797,7 @@
     {
       "rendererId": "office-wordperfect",
       "id": "wordperfect-libwpd-wasm",
-      "to": "/workspace/static/file-viewer/vendor/wordperfect/libwpd.wasm",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/wordperfect/libwpd.wasm",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2806,7 +2806,7 @@
     {
       "rendererId": "office-wordperfect",
       "id": "wordperfect-libwpd-module",
-      "to": "/workspace/static/file-viewer/vendor/wordperfect/libwpd.mjs",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/wordperfect/libwpd.mjs",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2815,7 +2815,7 @@
     {
       "rendererId": "typst",
       "id": "typst-compiler-wasm",
-      "to": "/workspace/static/file-viewer/wasm/typst/typst_ts_web_compiler_bg.wasm",
+      "to": "/workspace/lg-work/static/file-viewer/wasm/typst/typst_ts_web_compiler_bg.wasm",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2824,7 +2824,7 @@
     {
       "rendererId": "typst",
       "id": "typst-renderer-wasm",
-      "to": "/workspace/static/file-viewer/wasm/typst/typst_ts_renderer_bg.wasm",
+      "to": "/workspace/lg-work/static/file-viewer/wasm/typst/typst_ts_renderer_bg.wasm",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2833,7 +2833,7 @@
     {
       "rendererId": "typst",
       "id": "typst-font-assets",
-      "to": "/workspace/static/file-viewer/wasm/typst/fonts",
+      "to": "/workspace/lg-work/static/file-viewer/wasm/typst/fonts",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2842,7 +2842,7 @@
     {
       "rendererId": "illustrator-pdf-design",
       "id": "illustrator-pdf-design-third-party-notices",
-      "to": "/workspace/static/file-viewer/vendor/design/THIRD_PARTY_NOTICES.md",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/design/THIRD_PARTY_NOTICES.md",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2851,7 +2851,7 @@
     {
       "rendererId": "illustrator-pdf-design",
       "id": "illustrator-pgf-license",
-      "to": "/workspace/static/file-viewer/vendor/design/LICENSE.illustrator-pgf-MIT.txt",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/design/LICENSE.illustrator-pgf-MIT.txt",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2860,7 +2860,7 @@
     {
       "rendererId": "illustrator-pdf-design",
       "id": "illustrator-pgf-worker",
-      "to": "/workspace/static/file-viewer/vendor/design/illustrator-pgf.worker.js",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/design/illustrator-pgf.worker.js",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2869,7 +2869,7 @@
     {
       "rendererId": "illustrator-pdf-design",
       "id": "illustrator-zstd-license",
-      "to": "/workspace/static/file-viewer/vendor/design/LICENSE.fzstd-MIT.txt",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/design/LICENSE.fzstd-MIT.txt",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2878,7 +2878,7 @@
     {
       "rendererId": "photoshop-design",
       "id": "photoshop-design-third-party-notices",
-      "to": "/workspace/static/file-viewer/vendor/design/THIRD_PARTY_NOTICES.md",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/design/THIRD_PARTY_NOTICES.md",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2887,7 +2887,7 @@
     {
       "rendererId": "photoshop-design",
       "id": "photoshop-design-ag-psd-license",
-      "to": "/workspace/static/file-viewer/vendor/design/LICENSE.ag-psd-MIT.txt",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/design/LICENSE.ag-psd-MIT.txt",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2896,7 +2896,7 @@
     {
       "rendererId": "photoshop-design",
       "id": "photoshop-design-base64-js-license",
-      "to": "/workspace/static/file-viewer/vendor/design/LICENSE.base64-js-MIT.txt",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/design/LICENSE.base64-js-MIT.txt",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2905,7 +2905,7 @@
     {
       "rendererId": "photoshop-design",
       "id": "photoshop-design-pako-license",
-      "to": "/workspace/static/file-viewer/vendor/design/LICENSE.pako-MIT.txt",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/design/LICENSE.pako-MIT.txt",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2914,7 +2914,7 @@
     {
       "rendererId": "photoshop-design",
       "id": "photoshop-design-webtoon-psd-license",
-      "to": "/workspace/static/file-viewer/vendor/design/LICENSE.webtoon-psd-MIT.txt",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/design/LICENSE.webtoon-psd-MIT.txt",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2923,7 +2923,7 @@
     {
       "rendererId": "photoshop-design",
       "id": "photoshop-design-worker",
-      "to": "/workspace/static/file-viewer/vendor/design/photoshop.worker.js",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/design/photoshop.worker.js",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2932,7 +2932,7 @@
     {
       "rendererId": "photoshop-resource-design",
       "id": "photoshop-resource-design-third-party-notices",
-      "to": "/workspace/static/file-viewer/vendor/design/THIRD_PARTY_NOTICES.md",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/design/THIRD_PARTY_NOTICES.md",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2941,7 +2941,7 @@
     {
       "rendererId": "photoshop-resource-design",
       "id": "photoshop-resource-design-ag-psd-license",
-      "to": "/workspace/static/file-viewer/vendor/design/LICENSE.ag-psd-MIT.txt",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/design/LICENSE.ag-psd-MIT.txt",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2950,7 +2950,7 @@
     {
       "rendererId": "photoshop-resource-design",
       "id": "photoshop-resource-design-base64-js-license",
-      "to": "/workspace/static/file-viewer/vendor/design/LICENSE.base64-js-MIT.txt",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/design/LICENSE.base64-js-MIT.txt",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2959,7 +2959,7 @@
     {
       "rendererId": "photoshop-resource-design",
       "id": "photoshop-resource-design-pako-license",
-      "to": "/workspace/static/file-viewer/vendor/design/LICENSE.pako-MIT.txt",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/design/LICENSE.pako-MIT.txt",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2968,7 +2968,7 @@
     {
       "rendererId": "photoshop-resource-design",
       "id": "photoshop-resource-worker",
-      "to": "/workspace/static/file-viewer/vendor/design/adobe-resource.worker.js",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/design/adobe-resource.worker.js",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2977,7 +2977,7 @@
     {
       "rendererId": "adobe-palette-design",
       "id": "adobe-palette-design-third-party-notices",
-      "to": "/workspace/static/file-viewer/vendor/design/THIRD_PARTY_NOTICES.md",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/design/THIRD_PARTY_NOTICES.md",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2986,7 +2986,7 @@
     {
       "rendererId": "adobe-palette-design",
       "id": "adobe-palette-design-xmldom-license",
-      "to": "/workspace/static/file-viewer/vendor/design/LICENSE.xmldom-MIT.txt",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/design/LICENSE.xmldom-MIT.txt",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -2995,7 +2995,7 @@
     {
       "rendererId": "adobe-palette-design",
       "id": "adobe-palette-design-saxes-license",
-      "to": "/workspace/static/file-viewer/vendor/design/LICENSE.saxes-ISC.txt",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/design/LICENSE.saxes-ISC.txt",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -3004,7 +3004,7 @@
     {
       "rendererId": "adobe-palette-design",
       "id": "adobe-palette-design-xmlchars-license",
-      "to": "/workspace/static/file-viewer/vendor/design/LICENSE.xmlchars-MIT.txt",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/design/LICENSE.xmlchars-MIT.txt",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -3013,7 +3013,7 @@
     {
       "rendererId": "adobe-palette-design",
       "id": "adobe-palette-container-worker",
-      "to": "/workspace/static/file-viewer/vendor/design/adobe-container.worker.js",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/design/adobe-container.worker.js",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -3022,7 +3022,7 @@
     {
       "rendererId": "indesign-exchange-design",
       "id": "indesign-exchange-design-third-party-notices",
-      "to": "/workspace/static/file-viewer/vendor/design/THIRD_PARTY_NOTICES.md",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/design/THIRD_PARTY_NOTICES.md",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -3031,7 +3031,7 @@
     {
       "rendererId": "indesign-exchange-design",
       "id": "indesign-exchange-design-xmldom-license",
-      "to": "/workspace/static/file-viewer/vendor/design/LICENSE.xmldom-MIT.txt",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/design/LICENSE.xmldom-MIT.txt",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -3040,7 +3040,7 @@
     {
       "rendererId": "indesign-exchange-design",
       "id": "indesign-exchange-design-saxes-license",
-      "to": "/workspace/static/file-viewer/vendor/design/LICENSE.saxes-ISC.txt",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/design/LICENSE.saxes-ISC.txt",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -3049,7 +3049,7 @@
     {
       "rendererId": "indesign-exchange-design",
       "id": "indesign-exchange-design-xmlchars-license",
-      "to": "/workspace/static/file-viewer/vendor/design/LICENSE.xmlchars-MIT.txt",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/design/LICENSE.xmlchars-MIT.txt",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -3058,7 +3058,7 @@
     {
       "rendererId": "indesign-exchange-design",
       "id": "indesign-exchange-container-worker",
-      "to": "/workspace/static/file-viewer/vendor/design/adobe-container.worker.js",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/design/adobe-container.worker.js",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -3067,7 +3067,7 @@
     {
       "rendererId": "adobe-animate-xfl-design",
       "id": "adobe-animate-xfl-design-third-party-notices",
-      "to": "/workspace/static/file-viewer/vendor/design/THIRD_PARTY_NOTICES.md",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/design/THIRD_PARTY_NOTICES.md",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -3076,7 +3076,7 @@
     {
       "rendererId": "adobe-animate-xfl-design",
       "id": "adobe-animate-xfl-design-xmldom-license",
-      "to": "/workspace/static/file-viewer/vendor/design/LICENSE.xmldom-MIT.txt",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/design/LICENSE.xmldom-MIT.txt",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -3085,7 +3085,7 @@
     {
       "rendererId": "adobe-animate-xfl-design",
       "id": "adobe-animate-xfl-design-saxes-license",
-      "to": "/workspace/static/file-viewer/vendor/design/LICENSE.saxes-ISC.txt",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/design/LICENSE.saxes-ISC.txt",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -3094,7 +3094,7 @@
     {
       "rendererId": "adobe-animate-xfl-design",
       "id": "adobe-animate-xfl-design-xmlchars-license",
-      "to": "/workspace/static/file-viewer/vendor/design/LICENSE.xmlchars-MIT.txt",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/design/LICENSE.xmlchars-MIT.txt",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -3103,7 +3103,7 @@
     {
       "rendererId": "adobe-animate-xfl-design",
       "id": "adobe-animate-xfl-container-worker",
-      "to": "/workspace/static/file-viewer/vendor/design/adobe-container.worker.js",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/design/adobe-container.worker.js",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -3112,7 +3112,7 @@
     {
       "rendererId": "adobe-xd-design",
       "id": "adobe-xd-design-third-party-notices",
-      "to": "/workspace/static/file-viewer/vendor/design/THIRD_PARTY_NOTICES.md",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/design/THIRD_PARTY_NOTICES.md",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -3121,7 +3121,7 @@
     {
       "rendererId": "adobe-xd-design",
       "id": "adobe-xd-design-xmldom-license",
-      "to": "/workspace/static/file-viewer/vendor/design/LICENSE.xmldom-MIT.txt",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/design/LICENSE.xmldom-MIT.txt",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -3130,7 +3130,7 @@
     {
       "rendererId": "adobe-xd-design",
       "id": "adobe-xd-design-saxes-license",
-      "to": "/workspace/static/file-viewer/vendor/design/LICENSE.saxes-ISC.txt",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/design/LICENSE.saxes-ISC.txt",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -3139,7 +3139,7 @@
     {
       "rendererId": "adobe-xd-design",
       "id": "adobe-xd-design-xmlchars-license",
-      "to": "/workspace/static/file-viewer/vendor/design/LICENSE.xmlchars-MIT.txt",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/design/LICENSE.xmlchars-MIT.txt",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -3148,7 +3148,7 @@
     {
       "rendererId": "adobe-xd-design",
       "id": "adobe-xd-container-worker",
-      "to": "/workspace/static/file-viewer/vendor/design/adobe-container.worker.js",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/design/adobe-container.worker.js",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -3157,7 +3157,7 @@
     {
       "rendererId": "indesign-native-design",
       "id": "indesign-native-design-third-party-notices",
-      "to": "/workspace/static/file-viewer/vendor/design/THIRD_PARTY_NOTICES.md",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/design/THIRD_PARTY_NOTICES.md",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -3166,7 +3166,7 @@
     {
       "rendererId": "indesign-native-design",
       "id": "indesign-native-design-xmldom-license",
-      "to": "/workspace/static/file-viewer/vendor/design/LICENSE.xmldom-MIT.txt",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/design/LICENSE.xmldom-MIT.txt",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -3175,7 +3175,7 @@
     {
       "rendererId": "indesign-native-design",
       "id": "indesign-native-design-saxes-license",
-      "to": "/workspace/static/file-viewer/vendor/design/LICENSE.saxes-ISC.txt",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/design/LICENSE.saxes-ISC.txt",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -3184,7 +3184,7 @@
     {
       "rendererId": "indesign-native-design",
       "id": "indesign-native-design-xmlchars-license",
-      "to": "/workspace/static/file-viewer/vendor/design/LICENSE.xmlchars-MIT.txt",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/design/LICENSE.xmlchars-MIT.txt",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -3193,7 +3193,7 @@
     {
       "rendererId": "indesign-native-design",
       "id": "indesign-native-container-worker",
-      "to": "/workspace/static/file-viewer/vendor/design/adobe-container.worker.js",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/design/adobe-container.worker.js",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -3202,7 +3202,7 @@
     {
       "rendererId": "postscript-design",
       "id": "postscript-design-third-party-notices",
-      "to": "/workspace/static/file-viewer/vendor/design/THIRD_PARTY_NOTICES.md",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/design/THIRD_PARTY_NOTICES.md",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -3211,7 +3211,7 @@
     {
       "rendererId": "postscript-design",
       "id": "postscript-design-worker",
-      "to": "/workspace/static/file-viewer/vendor/design/postscript.worker.js",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/design/postscript.worker.js",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -3220,7 +3220,7 @@
     {
       "rendererId": "postscript-design",
       "id": "postscript-design-wasm",
-      "to": "/workspace/static/file-viewer/vendor/design/stet_wasm_bg.wasm",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/design/stet_wasm_bg.wasm",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -3229,7 +3229,7 @@
     {
       "rendererId": "postscript-design",
       "id": "postscript-design-license-stet-apache",
-      "to": "/workspace/static/file-viewer/vendor/design/LICENSE.stet-Apache-2.0.txt",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/design/LICENSE.stet-Apache-2.0.txt",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -3238,7 +3238,7 @@
     {
       "rendererId": "postscript-design",
       "id": "postscript-design-license-stet-mit",
-      "to": "/workspace/static/file-viewer/vendor/design/LICENSE.stet-MIT.txt",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/design/LICENSE.stet-MIT.txt",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -3247,7 +3247,7 @@
     {
       "rendererId": "postscript-design",
       "id": "postscript-design-license-carlito-ofl",
-      "to": "/workspace/static/file-viewer/vendor/design/LICENSE.Carlito-OFL-1.1.txt",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/design/LICENSE.Carlito-OFL-1.1.txt",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -3256,7 +3256,7 @@
     {
       "rendererId": "postscript-design",
       "id": "postscript-design-license-tinos-ofl",
-      "to": "/workspace/static/file-viewer/vendor/design/LICENSE.Tinos-OFL-1.1.txt",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/design/LICENSE.Tinos-OFL-1.1.txt",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -3265,7 +3265,7 @@
     {
       "rendererId": "postscript-design",
       "id": "postscript-design-license-cousine-ofl",
-      "to": "/workspace/static/file-viewer/vendor/design/LICENSE.Cousine-OFL-1.1.txt",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/design/LICENSE.Cousine-OFL-1.1.txt",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -3274,7 +3274,7 @@
     {
       "rendererId": "postscript-design",
       "id": "postscript-design-license-noto-symbols-ofl",
-      "to": "/workspace/static/file-viewer/vendor/design/LICENSE.NotoSansSymbols2-OFL-1.1.txt",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/design/LICENSE.NotoSansSymbols2-OFL-1.1.txt",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -3283,7 +3283,7 @@
     {
       "rendererId": "indesign-idml-design",
       "id": "indesign-idml-design-third-party-notices",
-      "to": "/workspace/static/file-viewer/vendor/design/THIRD_PARTY_NOTICES.md",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/design/THIRD_PARTY_NOTICES.md",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -3292,7 +3292,7 @@
     {
       "rendererId": "indesign-idml-design",
       "id": "indesign-idml-worker",
-      "to": "/workspace/static/file-viewer/vendor/design/idml.worker.js",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/design/idml.worker.js",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -3301,7 +3301,7 @@
     {
       "rendererId": "indesign-idml-design",
       "id": "indesign-idml-wasm",
-      "to": "/workspace/static/file-viewer/vendor/design/paged_introspect_wasm_bg.wasm",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/design/paged_introspect_wasm_bg.wasm",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -3310,7 +3310,7 @@
     {
       "rendererId": "indesign-idml-design",
       "id": "indesign-idml-license",
-      "to": "/workspace/static/file-viewer/vendor/design/LICENSE.introspect-wasm-MPL-2.0.txt",
+      "to": "/workspace/lg-work/static/file-viewer/vendor/design/LICENSE.introspect-wasm-MPL-2.0.txt",
       "copied": true,
       "required": true,
       "sourcePackage": "@file-viewer/web-full",
@@ -3319,7 +3319,7 @@
     {
       "rendererId": "data-asset",
       "id": "data-sql-wasm",
-      "to": "/workspace/static/file-viewer/wasm/data/sql-wasm.wasm",
+      "to": "/workspace/lg-work/static/file-viewer/wasm/data/sql-wasm.wasm",
       "copied": true,
       "required": false,
       "sourcePackage": "@file-viewer/web-full",
