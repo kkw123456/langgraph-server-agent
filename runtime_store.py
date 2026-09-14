@@ -85,6 +85,7 @@ class RuntimeStore:
                 cost              REAL NOT NULL DEFAULT 0,     -- 消耗费用
                 success           INTEGER NOT NULL DEFAULT 0,  -- 0失败 1成功
                 cost_time         INTEGER NOT NULL DEFAULT 0,  -- 耗时ms
+                estimated         INTEGER NOT NULL DEFAULT 0,  -- token 是否为估算值
                 create_time       REAL NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_call_model ON model_call_log(model);
@@ -118,6 +119,9 @@ class RuntimeStore:
         for col, ddl in prov_cols:
             if not self._has_col(conn, "providers", col):
                 conn.execute(f"ALTER TABLE providers ADD COLUMN {col} {ddl}")
+        # 调用日志：token 是否估算（后加列，兼容既有库）
+        if self._has_col(conn, "model_call_log", "id") and not self._has_col(conn, "model_call_log", "estimated"):
+            conn.execute("ALTER TABLE model_call_log ADD COLUMN estimated INTEGER NOT NULL DEFAULT 0")
 
     def _migrate_json(self, conn: sqlite3.Connection):
         n_sys = conn.execute(
@@ -404,16 +408,20 @@ class RuntimeStore:
     # ---------- 调用日志 ----------
     def log_call(self, model: str, provider: str = "", user_id: str = "",
                  prompt_tokens: int = 0, completion_tokens: int = 0, cost: float = 0.0,
-                 success: bool = True, cost_time: int = 0) -> None:
-        """记录一次模型调用。任何异常都吞掉——日志失败绝不能影响主流程。"""
+                 success: bool = True, cost_time: int = 0, estimated: bool = False) -> None:
+        """记录一次模型调用。任何异常都吞掉——日志失败绝不能影响主流程。
+
+        estimated=True 表示 token 数为估算值（服务商未返回 usage 时的兜底）。
+        """
         try:
             total = int(prompt_tokens) + int(completion_tokens)
             self._conn().execute(
                 "INSERT INTO model_call_log "
                 "(model, provider, user_id, prompt_tokens, completion_tokens, total_tokens, "
-                " cost, success, cost_time, create_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " cost, success, cost_time, create_time, estimated) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (model, provider or "", user_id or "", int(prompt_tokens), int(completion_tokens),
-                 total, float(cost), 1 if success else 0, int(cost_time), time.time()),
+                 total, float(cost), 1 if success else 0, int(cost_time), time.time(),
+                 1 if estimated else 0),
             )
             self._conn().commit()
         except Exception:
@@ -429,7 +437,8 @@ class RuntimeStore:
             params.append(model)
         rows = self._conn().execute(
             f"SELECT model, provider, COUNT(*) AS calls, SUM(success) AS ok_calls, "
-            f"AVG(cost_time) AS avg_ms, SUM(total_tokens) AS total_tokens, SUM(cost) AS total_cost "
+            f"AVG(cost_time) AS avg_ms, SUM(total_tokens) AS total_tokens, SUM(cost) AS total_cost, "
+            f"SUM(estimated) AS est_calls "
             f"FROM model_call_log {where} GROUP BY model, provider ORDER BY calls DESC",
             params,
         ).fetchall()
@@ -442,6 +451,7 @@ class RuntimeStore:
                 "success_rate": round((r["ok_calls"] or 0) / calls * 100, 2) if calls else 0.0,
                 "avg_ms": round(r["avg_ms"] or 0, 1),
                 "total_tokens": r["total_tokens"] or 0,
+                "estimated_calls": r["est_calls"] or 0,
                 "total_cost": round(r["total_cost"] or 0, 4),
             })
         return out

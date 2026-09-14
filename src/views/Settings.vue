@@ -4,9 +4,9 @@
 import { onMounted, ref, computed, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import {
-  NCard, NRadioGroup, NRadioButton, NSelect, NButton, NTag, NInput, useMessage, useDialog,
+  NCard, NRadioGroup, NRadioButton, NSelect, NButton, NTag, NInput, NEmpty, useMessage, useDialog,
 } from 'naive-ui'
-import { Settings, LogOut, RefreshCw, Cpu, ShieldCheck, Database, Check, X, Plus, Server, Users, Lock, Globe } from 'lucide-vue-next'
+import { Settings, Settings2, LogOut, RefreshCw, Cpu, ShieldCheck, Database, Check, X, Plus, Server, Users, Lock, Globe, BarChart3 } from 'lucide-vue-next'
 import { state, setMode } from '../store'
 import {
   wb, loadRuntime, setModel, addModel, removeModel, addProvider, removeProvider,
@@ -91,16 +91,60 @@ const userGroups = computed<ProviderGroup[]>(() => [
 
 // 每个分组的「添加模型」输入框内容（key 带 scope 防串）
 const groupInputs = reactive<Record<string, string>>({})
+// 模型类型选项（对齐模型库 model_type：1LLM 2向量 3多模态）
+const MODEL_TYPE_OPTS = [
+  { label: '语言模型 LLM', value: 1 },
+  { label: '向量模型 Embedding', value: 2 },
+  { label: '多模态', value: 3 },
+]
 function gKey(g: ProviderGroup): string {
   return `${g.scope}:${g.name}`
 }
+// 「高级选项」：模型元数据（类型/上下文/描述/服务商侧模型名）——展开时才提交
+const showModelAdv = reactive<Record<string, boolean>>({})
+const modelMeta = reactive<Record<string, {
+  model_type: number; context_length: string; description: string; provider_model: string
+}>>({})
+function advKey(g: ProviderGroup): string {
+  return `adv:${g.scope}:${g.name}`
+}
+function metaOf(g: ProviderGroup) {
+  const k = gKey(g)
+  if (!modelMeta[k]) {
+    modelMeta[k] = { model_type: 1, context_length: '', description: '', provider_model: '' }
+  }
+  return modelMeta[k]
+}
+function toggleAdv(g: ProviderGroup): void {
+  const k = advKey(g)
+  showModelAdv[k] = !showModelAdv[k]
+}
 async function onAddModelTo(group: ProviderGroup): Promise<void> {
-  const name = (groupInputs[gKey(group)] || '').trim()
+  const k = gKey(group)
+  const name = (groupInputs[k] || '').trim()
   if (!name) {
     message.warning('请输入模型名称')
     return
   }
-  if (await addModel(name, group.name, group.scope)) groupInputs[gKey(group)] = ''
+  const m = metaOf(group)
+  const ctx = m.context_length.trim() ? Number(m.context_length) : null
+  if (ctx !== null && (!Number.isFinite(ctx) || ctx <= 0)) {
+    message.warning('上下文窗口需为正整数，或留空')
+    return
+  }
+  const meta = showModelAdv[advKey(group)]
+    ? {
+        model_type: m.model_type,
+        context_length: ctx,
+        description: m.description.trim(),
+        provider_model: m.provider_model.trim(),
+      }
+    : undefined
+  if (await addModel(name, group.name, group.scope, meta)) {
+    groupInputs[k] = ''
+    // 添加成功后重置高级选项，避免污染下一个模型
+    modelMeta[k] = { model_type: 1, context_length: '', description: '', provider_model: '' }
+  }
 }
 function onRemoveModel(m: string, group: ProviderGroup): void {
   dialog.warning({
@@ -126,6 +170,7 @@ const showProviderForm = ref(false)
 const pName = ref('')
 const pUrl = ref('')
 const pKey = ref('')
+const pCode = ref('')
 const pScope = ref<'system' | 'user'>('user')
 const addingProvider = ref(false)
 async function submitProvider(): Promise<void> {
@@ -137,14 +182,40 @@ async function submitProvider(): Promise<void> {
   }
   addingProvider.value = true
   try {
-    if (await addProvider(name, url, pKey.value, pScope.value)) {
+    if (await addProvider(name, url, pKey.value, pScope.value, pCode.value)) {
       pName.value = ''
       pUrl.value = ''
       pKey.value = ''
+      pCode.value = ''
       showProviderForm.value = false
     }
   } finally {
     addingProvider.value = false
+  }
+}
+
+// ===================== 模型调用统计（对齐模型库 ai_model_call_log） =====================
+interface CallStat {
+  model: string; provider: string; calls: number; ok_calls: number
+  success_rate: number; avg_ms: number; total_tokens: number
+  estimated_calls: number; total_cost: number
+}
+const callStats = ref<CallStat[]>([])
+const loadingStats = ref(false)
+const statsDays = ref(7)
+const statsLoaded = ref(false)
+async function loadCallStats(): Promise<void> {
+  loadingStats.value = true
+  try {
+    const r = await api.get<{ ok: boolean; days: number; stats: CallStat[] }>(
+      `/api/runtime/model-calls?days=${statsDays.value}`,
+    )
+    if (r && r.ok) {
+      callStats.value = r.stats || []
+      statsLoaded.value = true
+    }
+  } finally {
+    loadingStats.value = false
   }
 }
 
@@ -203,6 +274,7 @@ function onLogout(): void {
 
 onMounted(() => {
   void loadRuntime()
+  void loadCallStats()
   if (isAdmin.value) void loadUsers()
 })
 </script>
@@ -250,6 +322,7 @@ onMounted(() => {
                 </NButton>
                 <template v-else>
                   <NInput v-model:value="pName" class="set-prov-input" size="small" placeholder="名称，如 DeepSeek" :disabled="addingProvider" />
+                  <NInput v-model:value="pCode" class="set-prov-input" size="small" placeholder="编码（可选）deepseek" :disabled="addingProvider" />
                   <NInput v-model:value="pUrl" class="set-prov-input set-prov-url" size="small" placeholder="接口地址 https://…" :disabled="addingProvider" />
                   <NInput v-model:value="pKey" class="set-prov-input" size="small" type="password" show-password-on="click" placeholder="API Key（可选）" :disabled="addingProvider" @keyup.enter="submitProvider" />
                   <NRadioGroup v-if="isAdmin" v-model:value="pScope" size="small">
@@ -300,8 +373,29 @@ onMounted(() => {
                       @keyup.enter="onAddModelTo(g)"
                     />
                     <NButton size="tiny" secondary @click="onAddModelTo(g)">添加</NButton>
+                    <NButton size="tiny" quaternary :title="showModelAdv[advKey(g)] ? '收起高级选项' : '高级选项（类型/上下文/描述）'" @click="toggleAdv(g)">
+                      <template #icon><Settings2 :size="13" /></template>
+                    </NButton>
                   </span>
                 </span>
+                <div v-if="g.canManage && showModelAdv[advKey(g)]" class="set-model-adv">
+                  <NSelect
+                    v-model:value="metaOf(g).model_type" class="set-adv-field" size="tiny"
+                    :options="MODEL_TYPE_OPTS" placeholder="模型类型"
+                  />
+                  <NInput
+                    v-model:value="metaOf(g).context_length" class="set-adv-field" size="tiny"
+                    placeholder="上下文窗口，如 128000"
+                  />
+                  <NInput
+                    v-model:value="metaOf(g).provider_model" class="set-adv-field" size="tiny"
+                    placeholder="服务商侧模型名（可选，如 gpt-4o）"
+                  />
+                  <NInput
+                    v-model:value="metaOf(g).description" class="set-adv-field set-adv-wide" size="tiny"
+                    placeholder="描述（可选）"
+                  />
+                </div>
               </div>
             </template>
 
@@ -343,10 +437,78 @@ onMounted(() => {
                       @keyup.enter="onAddModelTo(g)"
                     />
                     <NButton size="tiny" secondary @click="onAddModelTo(g)">添加</NButton>
+                    <NButton size="tiny" quaternary :title="showModelAdv[advKey(g)] ? '收起高级选项' : '高级选项（类型/上下文/描述）'" @click="toggleAdv(g)">
+                      <template #icon><Settings2 :size="13" /></template>
+                    </NButton>
                   </span>
                 </span>
+                <div v-if="g.canManage && showModelAdv[advKey(g)]" class="set-model-adv">
+                  <NSelect
+                    v-model:value="metaOf(g).model_type" class="set-adv-field" size="tiny"
+                    :options="MODEL_TYPE_OPTS" placeholder="模型类型"
+                  />
+                  <NInput
+                    v-model:value="metaOf(g).context_length" class="set-adv-field" size="tiny"
+                    placeholder="上下文窗口，如 128000"
+                  />
+                  <NInput
+                    v-model:value="metaOf(g).provider_model" class="set-adv-field" size="tiny"
+                    placeholder="服务商侧模型名（可选，如 gpt-4o）"
+                  />
+                  <NInput
+                    v-model:value="metaOf(g).description" class="set-adv-field set-adv-wide" size="tiny"
+                    placeholder="描述（可选）"
+                  />
+                </div>
               </div>
             </template>
+          </div>
+        </NCard>
+
+        <!-- 模型调用统计（对齐模型库 ai_model_call_log） -->
+        <NCard size="small" title="模型调用统计">
+          <div class="set-body set-body-flat">
+            <div class="set-row">
+              <span class="set-label"><BarChart3 :size="14" /> 统计区间</span>
+              <span class="set-val set-val-inline">
+                <NSelect
+                  v-model:value="statsDays" class="set-adv-field" size="small"
+                  :options="[{label:'近 7 天',value:7},{label:'近 30 天',value:30},{label:'近 90 天',value:90}]"
+                  @update:value="loadCallStats"
+                />
+                <NButton size="small" quaternary :loading="loadingStats" @click="loadCallStats">
+                  <template #icon><RefreshCw :size="14" /></template>
+                  刷新
+                </NButton>
+              </span>
+            </div>
+            <div v-if="callStats.length" class="stat-table-wrap">
+              <table class="stat-table">
+                <thead>
+                  <tr>
+                    <th>模型</th><th>提供商</th><th>调用</th><th>成功率</th>
+                    <th>平均耗时</th><th>Token</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="s in callStats" :key="s.model + '|' + s.provider">
+                    <td class="stat-model">{{ s.model }}</td>
+                    <td class="muted">{{ s.provider || '默认' }}</td>
+                    <td>{{ s.calls }}</td>
+                    <td :class="{ 'stat-bad': s.success_rate < 90 }">{{ s.success_rate }}%</td>
+                    <td>{{ s.avg_ms }} ms</td>
+                    <td>
+                      {{ s.total_tokens }}
+                      <span v-if="s.estimated_calls" class="stat-est" :title="`${s.estimated_calls} 次为估算值（服务商未返回 usage）`">≈</span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <NEmpty v-else size="small" description="所选区间内暂无调用记录" />
+            <div v-if="callStats.some(s => s.estimated_calls)" class="muted tiny stat-note">
+              ≈ 标记表示部分调用的 token 数为估算值（服务商接口未返回 usage 字段）
+            </div>
           </div>
         </NCard>
 

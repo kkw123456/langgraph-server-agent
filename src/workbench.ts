@@ -208,14 +208,34 @@ export async function setModel(name: string): Promise<boolean> {
   return true
 }
 
+/** 模型的扩展元数据（对齐模型库） */
+export interface ModelMetaInput {
+  model_type?: number      // 1LLM 2向量 3多模态
+  status?: number          // 0下线 1上线
+  context_length?: number | null
+  description?: string
+  provider_model?: string  // 服务商侧真实模型名
+}
+
 /** 添加模型到可用列表（持久化到服务端）；provider 非空时挂到该自定义提供商下。
- *  scope: 'system'（admin 可管理，全员可见）/ 'user'（私有，默认）。 */
-export async function addModel(name: string, provider = '', scope: 'system' | 'user' = 'user'): Promise<boolean> {
+ *  scope: 'system'（admin 可管理，全员可见）/ 'user'（私有，默认）。
+ *  meta: 可选的模型元数据（类型/上线状态/上下文窗口/描述/服务商侧模型名）。 */
+export async function addModel(
+  name: string, provider = '', scope: 'system' | 'user' = 'user', meta?: ModelMetaInput,
+): Promise<boolean> {
   const n = (name || '').trim()
   if (!n) return false
+  const body: Record<string, unknown> = { name: n, provider, scope }
+  if (meta) {
+    if (meta.model_type !== undefined) body.model_type = meta.model_type
+    if (meta.status !== undefined) body.status = meta.status
+    if (meta.context_length !== undefined && meta.context_length !== null) body.context_length = meta.context_length
+    if (meta.description) body.description = meta.description
+    if (meta.provider_model) body.provider_model = meta.provider_model
+  }
   const r = await api.post<{
     ok: boolean; models?: string[]; providers?: RuntimeProvider[]; error?: string
-  }>('/api/runtime/models', { name: n, provider, scope })
+  }>('/api/runtime/models', body)
   if (!r.ok) {
     toast.error(r.error || '添加失败')
     return false
@@ -244,14 +264,17 @@ export async function removeModel(name: string, provider = '', scope: 'system' |
   return true
 }
 
-/** 添加模型提供商（OpenAI 兼容接口：名称 + 地址 + 密钥）。
- *  scope: 'system'（admin 专属）/ 'user'（私有，默认）。 */
+/** 添加模型提供商（OpenAI 兼容接口：名称 + 地址 + 密钥 + 编码）。
+ *  scope: 'system'（admin 专属）/ 'user'（私有，默认）。
+ *  code: 服务商编码（deepseek/zhipu/qwen...，可空）。 */
 export async function addProvider(
   name: string, baseUrl: string, apiKey = '', scope: 'system' | 'user' = 'user',
+  code = '',
 ): Promise<boolean> {
   const r = await api.post<{ ok: boolean; providers?: RuntimeProvider[]; error?: string }>(
     '/api/runtime/providers',
-    { name: (name || '').trim(), base_url: (baseUrl || '').trim(), api_key: (apiKey || '').trim(), scope },
+    { name: (name || '').trim(), base_url: (baseUrl || '').trim(),
+      api_key: (apiKey || '').trim(), scope, code: (code || '').trim() },
   )
   if (!r.ok) {
     toast.error(r.error || '添加提供商失败')

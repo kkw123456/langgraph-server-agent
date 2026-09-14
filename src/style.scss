@@ -1157,6 +1157,29 @@ body {
 .set-prov-input { width: 200px; max-width: 100%; }
 .set-prov-url { width: 260px; }
 
+/* 添加模型的「高级选项」区（类型/上下文/服务商模型名/描述） */
+.set-model-adv {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  margin: 8px 0 2px 0; padding: 8px 10px;
+  border: 1px dashed var(--border, rgba(128, 128, 128, .3)); border-radius: 8px;
+  background: var(--hover, rgba(128, 128, 128, .06));
+}
+.set-adv-field { width: 190px; max-width: 100%; }
+.set-adv-wide { width: 320px; }
+
+/* 模型调用统计表（设置页） */
+.stat-table-wrap { margin-top: 8px; overflow-x: auto; }
+.stat-table {
+  width: 100%; border-collapse: collapse; font-size: 12px;
+  th, td { padding: 6px 10px; text-align: left; border-bottom: 1px solid var(--border, rgba(128,128,128,.18)); white-space: nowrap; }
+  th { font-weight: 600; color: var(--muted); }
+  tbody tr:hover { background: var(--hover, rgba(128,128,128,.06)); }
+}
+.stat-model { font-weight: 600; }
+.stat-bad { color: var(--error, #d03050); }
+.stat-est { margin-left: 2px; color: var(--warning, #f0a020); cursor: help; }
+.stat-note { margin-top: 6px; }
+
 /* 设置页：模型 scope 区块头（系统模型 / 我的模型，#67） */
 .set-scope-head {
   display: flex; align-items: center; gap: 8px;

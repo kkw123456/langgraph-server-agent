@@ -141,6 +141,14 @@ export interface LibraryItem {
 // 运行时信息：可选模型与当前模型，以及各域统计（用于设置页展示）
 /** 模型提供商（OpenAI 兼容），api_key 服务端只回传脱敏提示；
  *  scope: system 全员可见（admin 管理）/ user 用户私有 */
+/** 单个模型的元数据（对齐模型库：类型 / 上线状态 / 服务商侧模型名） */
+export interface RuntimeModelMeta {
+  name: string
+  model_type?: number      // 1LLM 2向量 3多模态
+  status?: number          // 0下线 1上线
+  provider_model?: string  // 服务商侧真实模型名
+}
+
 export interface RuntimeProvider {
   name: string
   scope?: 'system' | 'user'
@@ -148,7 +156,10 @@ export interface RuntimeProvider {
   base_url: string
   has_key?: boolean
   key_hint?: string
+  code?: string            // 服务商编码 deepseek/zhipu/qwen
+  status?: number          // 0禁用 1启用
   models: string[]
+  model_meta?: RuntimeModelMeta[]
 }
 
 /** 用户（admin 管理页用，不含密码字段） */

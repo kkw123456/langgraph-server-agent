@@ -1357,19 +1357,27 @@ async def run_turn(cid: str, content: str, run: RunHandle | None, attachments: l
         if run:
             await run.emit({"type": "message_end", "stopped": cancelled})
         # 模型调用日志（对齐模型库 ai_model_call_log）：无论成败都记，
-        # 失败=执行期异常或正文里出现执行错误标记；手动停止不计为失败。
+        # 失败=执行期异常；手动停止不计为失败。
         if agent_manager is not None:
             _cfg = agent_manager.get_cfg(user)
             _ok = not _call_failed
+            _est = False
+            _p, _c = _usage_prompt, _usage_completion
+            # 服务商未返回 usage（如火山 Ark /api/plan/v1）时，用字符数兜底估算
+            if _p == 0 and _c == 0:
+                _p = _estimate_tokens(content)
+                _c = _estimate_tokens(assistant.get("content", ""))
+                _est = True
             runtime.log_call(
                 model=_cfg.get("model", ""),
                 provider=_cfg.get("provider", ""),
                 user_id=user,
-                prompt_tokens=_usage_prompt,
-                completion_tokens=_usage_completion,
+                prompt_tokens=_p,
+                completion_tokens=_c,
                 cost=0.0,  # 费用需模型定价，暂记 0（后续可接单价表计算）
                 success=_ok,
                 cost_time=int((time.monotonic() - _call_start) * 1000),
+                estimated=_est,
             )
         return {"assistant": assistant}
     finally:
@@ -1415,6 +1423,24 @@ def _chunk_text(chunk) -> str:
     if isinstance(c, list):
         return "".join(p.get("text", "") if isinstance(p, dict) else str(p) for p in c)
     return ""
+
+
+def _estimate_tokens(text: str) -> int:
+    """粗略估算 token 数（服务商未返回 usage 时兜底）。
+
+    经验近似：CJK 字符约 1 token/字；其他（含英文/符号）约 1 token/4 字符。
+    仅用于统计量级，不精确——调用日志会以 estimated 标记区分。
+    """
+    if not text:
+        return 0
+    cjk = 0
+    other = 0
+    for ch in text:
+        if "\u4e00" <= ch <= "\u9fff" or "\u3040" <= ch <= "\u30ff" or "\uac00" <= ch <= "\ud7af":
+            cjk += 1
+        else:
+            other += 1
+    return cjk + (other + 3) // 4
 
 
 def _chunk_reasoning(chunk) -> str:
