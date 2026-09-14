@@ -7,7 +7,7 @@ import { api } from './api'
 import { message as toast } from './main'
 import type {
   Project, Automation, LibraryItem, RuntimeInfo, RuntimeProvider, AutoSchedule, UserInfo,
-  ModelCatalog, CatalogProvider,
+  ModelCatalog, CatalogProvider, ProviderInput,
 } from './types'
 
 interface WorkbenchState {
@@ -284,6 +284,28 @@ export async function addProvider(
   wb.runtime.providers = r.providers || []
   toast.success(`已添加提供商 ${name}`)
   return true
+}
+
+/** 批量添加模型提供商（「添加供应商」弹框一键保存）：一条请求原子写入。
+ *  任一条非法则整体拒绝，不会出现「前几个加进去了、后面几个没加」的半截状态。 */
+export async function addProvidersBatch(
+  items: ProviderInput[],
+): Promise<{ ok: boolean; error?: string; added: string[] }> {
+  if (!items.length) return { ok: true, added: [] }
+  const r = await api.post<{
+    ok: boolean; providers?: RuntimeProvider[]; added?: string[]; error?: string
+  }>('/api/runtime/providers/batch', {
+    items: items.map((it) => ({
+      name: (it.name || '').trim(),
+      base_url: (it.baseUrl || '').trim(),
+      api_key: (it.apiKey || '').trim(),
+      code: (it.code || '').trim(),
+      status: it.status ?? 1,
+    })),
+  })
+  if (!r.ok) return { ok: false, error: r.error || '批量添加提供商失败', added: [] }
+  wb.runtime.providers = r.providers || []
+  return { ok: true, added: r.added || [] }
 }
 
 /** 删除模型提供商（其下模型一并移除；正用的模型会回退到默认表）。 */

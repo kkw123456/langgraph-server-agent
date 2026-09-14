@@ -783,27 +783,26 @@ def api_del_model(request: Request, name: str, scope: str = "user", provider: st
     }
 
 
-@app.post("/api/runtime/providers", dependencies=[Depends(require_auth)])
-async def api_add_provider(request: Request, body: dict):
-    """添加模型提供商（OpenAI 兼容接口）：name 唯一、base_url 必须是 http(s) 地址。
-    scope: system（admin 专属）/ user（私有，默认）。"""
+def _validate_provider_input(body: dict, role: str) -> tuple[dict | None, str | None]:
+    """校验并归一化「添加提供商」入参，返回 (清洗后的字段, 错误文案)。
+
+    单条添加与批量添加共用，避免两条路径的校验规则漂移
+    （历史上出现过单条校验了 default 重名、批量漏掉的情况）。
+    """
     name = (body.get("name") or "").strip()
     base_url = (body.get("base_url") or "").strip()
     api_key = (body.get("api_key") or "").strip()
     if not name or len(name) > 60:
-        return {"ok": False, "error": "提供商名称不能为空（≤60 字符）"}
+        return None, "提供商名称不能为空（≤60 字符）"
     if name.lower() == "default":
-        return {"ok": False, "error": "default 为内置默认提供商，请换一个名称"}
+        return None, "default 为内置默认提供商，请换一个名称"
     if not base_url.lower().startswith(("http://", "https://")):
-        return {"ok": False, "error": "接口地址需以 http:// 或 https:// 开头"}
-    role = _current_role(request)
+        return None, "接口地址需以 http:// 或 https:// 开头"
     scope = (body.get("scope") or "user").strip()
     if scope not in ("system", "user"):
         scope = "user"
     if scope == "system" and role != "admin":
-        return {"ok": False, "error": "系统提供商仅管理员可管理"}
-    owner = "" if scope == "system" else _current_user(request)
-    # 服务商编码（deepseek/zhipu/qwen...，可空）与启用状态
+        return None, "系统提供商仅管理员可管理"
     code = (body.get("code") or "").strip()[:64]
     try:
         pstatus = int(body.get("status", 1))
@@ -811,11 +810,75 @@ async def api_add_provider(request: Request, body: dict):
         pstatus = 1
     if pstatus not in (0, 1):
         pstatus = 1
-    if not runtime.add_provider(name, base_url, api_key, scope, owner, code=code, status=pstatus):
-        return {"ok": False, "error": f"提供商 {name} 已存在"}
+    return {
+        "name": name, "base_url": base_url, "api_key": api_key,
+        "scope": scope, "status": pstatus, "code": code,
+    }, None
+
+
+@app.post("/api/runtime/providers", dependencies=[Depends(require_auth)])
+async def api_add_provider(request: Request, body: dict):
+    """添加模型提供商（OpenAI 兼容接口）：name 唯一、base_url 必须是 http(s) 地址。
+    scope: system（admin 专属）/ user（私有，默认）。"""
+    role = _current_role(request)
+    fields, err = _validate_provider_input(body, role)
+    if err:
+        return {"ok": False, "error": err}
+    owner = "" if fields["scope"] == "system" else _current_user(request)
+    if not runtime.add_provider(fields["name"], fields["base_url"], fields["api_key"],
+                                fields["scope"], owner,
+                                code=fields["code"], status=fields["status"]):
+        return {"ok": False, "error": f"提供商 {fields['name']} 已存在"}
     return {
         "ok": True,
         "providers": [_provider_public(x) for x in runtime.list_providers(owner)],
+    }
+
+
+@app.post("/api/runtime/providers/batch", dependencies=[Depends(require_auth)])
+async def api_add_providers_batch(request: Request, body: dict):
+    """批量添加提供商（「添加供应商」弹框一键保存）：一条请求原子写入。
+
+    事件循环里逐条 await 会让前几条已经落库、后几条失败，前端只能拿到一个
+    残缺结果；这里在同步函数内一次跑完，任一条非法即整体拒绝，不做半截写入。
+    body: {"items": [{"name","base_url","api_key","code","status"}]}
+    """
+    items = body.get("items")
+    if not isinstance(items, list) or not items:
+        return {"ok": False, "error": "items 需为非空数组"}
+    if len(items) > 50:
+        return {"ok": False, "error": "单次最多添加 50 个提供商"}
+    role = _current_role(request)
+    user = _current_user(request)
+
+    plan: list[dict] = []
+    seen: set[str] = set()
+    for i, raw in enumerate(items):
+        if not isinstance(raw, dict):
+            return {"ok": False, "error": f"第 {i + 1} 项格式错误"}
+        fields, err = _validate_provider_input(raw, role)
+        if err:
+            label = (raw.get("name") or f"第 {i + 1} 项").strip()
+            return {"ok": False, "error": f"{label}：{err}"}
+        if fields["name"] in seen:
+            return {"ok": False, "error": f"提供商 {fields['name']} 在本次提交中重复"}
+        seen.add(fields["name"])
+        plan.append(fields)
+
+    added: list[str] = []
+    for f in plan:
+        owner = "" if f["scope"] == "system" else user
+        if not runtime.add_provider(f["name"], f["base_url"], f["api_key"],
+                                    f["scope"], owner,
+                                    code=f["code"], status=f["status"]):
+            # 同名可能已被先前请求写入，或用户私有与系统级撞名，逐条报告
+            return {"ok": False, "error": f"提供商 {f['name']} 已存在（已写入：{', '.join(added) or '无'}）"}
+        added.append(f["name"])
+    _retune_agent_models()
+    return {
+        "ok": True,
+        "added": added,
+        "providers": [_provider_public(x) for x in runtime.list_providers(user)],
     }
 
 

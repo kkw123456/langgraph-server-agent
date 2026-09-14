@@ -4,8 +4,9 @@ import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { NAvatar } from 'naive-ui'
 import {
-  Bot, BrainCircuit, Braces, ChevronDown, Code2, Eye, FileOutput, FilePlus2, FileText, FolderClosed,
-  Globe, Loader2, Table2, Terminal, UserRound, Wrench,
+  BarChart3, Bot, BrainCircuit, Braces, ChevronDown, Code2, Database, Eye, FileOutput, FilePlus2,
+  FileSpreadsheet, FileText, FolderClosed, Globe, Image as ImageIcon, Languages, Loader2, Mic,
+  Search, Table2, Terminal, UserRound, Volume2, Wrench,
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
 import type { Message, ToolCall } from '../types'
@@ -113,19 +114,49 @@ function mergeAdjacent(calls: ToolCall[]): ToolCall[] {
 }
 
 // ===================== 工具节点：按工具类型换图标 =====================
+// key 必须是后端工具的真实 name（见 tools/builtin_tools.py 与 skills/builtin/*.py）
 const TOOL_ICONS: Record<string, Component> = {
+  // 基础
   run_python: Terminal,
   run_command: Terminal,
+  run_shell: Terminal,
   write_file: FilePlus2,
   edit_file: FilePlus2,
   read_file: FileText,
   list_dir: FolderClosed,
+  make_dir: FolderClosed,
+  search_files: Search,
   delete_file: FileOutput,
-  web_search: Globe,
+  calculator: Braces,
+  get_current_datetime: Wrench,
+  // 网络
+  web_search: Search,
+  web_fetch: Globe,
   fetch_url: Globe,
+  // 数据库
   query_table: Table2,
   run_sql: Table2,
-  call_llm: Braces,
+  sql_exec: Database,
+  sql_schema: Database,
+  // 图表
+  plot_chart: BarChart3,
+  update_chart: BarChart3,
+  export_chart: BarChart3,
+  // 文档
+  parse_pdf: FileText,
+  read_docx: FileText,
+  excel_read: FileSpreadsheet,
+  excel_write: FileSpreadsheet,
+  // 图像 / 语音
+  convert_image: ImageIcon,
+  ocr_image: ImageIcon,
+  tts_speak: Volume2,
+  stt_listen: Mic,
+  // 检索 / 模型
+  kb_search: Search,
+  call_llm: BrainCircuit,
+  // 其他
+  language: Languages,
 }
 function toolIcon(name: string): Component {
   return TOOL_ICONS[name] || Wrench
@@ -150,9 +181,17 @@ function pick(obj: Record<string, unknown> | null, ...keys: string[]): string {
   return ''
 }
 
+/** 工具节点的展示摘要。kind 用于区分路径是文件还是目录：
+ *  目录不可在右侧面板预览，前端据此把路径渲染成静态文本而非可点链接。 */
+export interface ToolSummary {
+  title: string
+  path?: string
+  kind?: 'file' | 'dir'
+}
+
 /** 语义化标题：动作名 + 关键参数摘要（url / 搜索词 / 命令等）。
  *  文件路径不再拼进标题（与 tn-path 重复），统一由 tn-path 单独展示并可点击。 */
-function toolSummary(tc: ToolCall): { title: string; path?: string } {
+function toolSummary(tc: ToolCall): ToolSummary {
   const obj = parseInput(tc.input)
   const path = pick(obj, 'path', 'file', 'file_path', 'dir', 'directory')
   // 参数摘要截断：超长显示省略号，防止撑爆工具节点标题行
@@ -167,19 +206,23 @@ function toolSummary(tc: ToolCall): { title: string; path?: string } {
       return { title: cmd ? `运行命令 ${snip(cmd, 42)}` : '运行命令' }
     }
     case 'write_file':
-      return { title: '添加文件', path: path || undefined }
+      return { title: '添加文件', path: path || undefined, kind: 'file' }
     case 'edit_file':
-      return { title: '修改文件', path: path || undefined }
+      return { title: '修改文件', path: path || undefined, kind: 'file' }
     case 'delete_file':
-      return { title: '删除文件', path: path || undefined }
+      return { title: '删除文件', path: path || undefined, kind: 'file' }
+    // make_dir 的目标必然是目录，不可预览
     case 'make_dir':
-      return { title: '添加目录', path: path || undefined }
+      return { title: '添加目录', path: path || undefined, kind: 'dir' }
     case 'read_file':
-      return { title: '读取文件', path: path || undefined }
+      return { title: '读取文件', path: path || undefined, kind: 'file' }
     case 'list_dir': {
       const p = (path || '').trim()
       // 浏览根目录（. / ./ / 空）时显示「浏览工作目录」，而不是突兀的 "."
-      return !p || p === '.' || p === './' ? { title: '浏览工作目录' } : { title: '浏览目录', path: p }
+      // list_dir 的 path 也一定是目录
+      return !p || p === '.' || p === './'
+        ? { title: '浏览工作目录' }
+        : { title: '浏览目录', path: p, kind: 'dir' }
     }
     case 'search_files': {
       const kw = pick(obj, 'pattern', 'query', 'keyword', 'kw')
@@ -199,9 +242,39 @@ function toolSummary(tc: ToolCall): { title: string; path?: string } {
       const expr = pick(obj, 'expression', 'expr')
       return expr ? { title: `计算 ${snip(expr, 40)}` } : { title: '计算' }
     }
+    // 技能类工具：文档/图片/表格类必然操作文件，路径可预览
+    case 'parse_pdf':
+    case 'read_docx':
+    case 'excel_read':
+    case 'excel_write':
+    case 'convert_image':
+    case 'ocr_image':
+      return { title: toolLabel(tc.name), path: path || undefined, kind: 'file' }
+    case 'plot_chart':
+    case 'update_chart':
+    case 'export_chart':
+      // 图表工具的 path 指已有图表文件（可能为空 = 新建），可预览
+      return { title: toolLabel(tc.name), path: path || undefined, kind: path ? 'file' : undefined }
     default:
       return path ? { title: toolLabel(tc.name), path } : { title: toolLabel(tc.name) }
   }
+}
+
+/**
+ * toolSummary 的记忆化包装。
+ *
+ * 模板里每个工具节点要读 summary 的 title 与 path/kind（共 4 处），若每次都调
+ * toolSummary 就会重复 JSON.parse 输入。用 WeakMap 按 ToolCall 对象缓存：
+ * 消息对象的引用在流式更新时会被替换，WeakMap 不会造成泄漏。
+ */
+const summaryCache = new WeakMap<ToolCall, ToolSummary>()
+function summaryOf(tc: ToolCall): ToolSummary {
+  let s = summaryCache.get(tc)
+  if (!s) {
+    s = toolSummary(tc)
+    summaryCache.set(tc, s)
+  }
+  return s
 }
 
 /** 输入/输出 JSON 美化：合法 JSON 两空格缩进，其余按原文。 */
@@ -321,13 +394,19 @@ function attachType(name: string): string {
               <!-- 点击 header 收起/展开；文件路径单独可点（在右面板打开） -->
               <div class="tn-head" @click="toggle(si, ti)">
                 <span class="tn-ico"><component :is="toolIcon(tc.name)" :size="14" /></span>
-                <span class="tn-name">{{ toolSummary(tc).title }}</span>
+                <span class="tn-name">{{ summaryOf(tc).title }}</span>
+                <!-- 目录不可预览：渲染为静态文本（带文件夹图标），不响应点击 -->
                 <span
-                  v-if="toolSummary(tc).path"
+                  v-if="summaryOf(tc).path && summaryOf(tc).kind === 'dir'"
+                  class="tn-path is-dir"
+                  title="目录（不可预览）"
+                ><FolderClosed :size="12" />{{ summaryOf(tc).path }}</span>
+                <span
+                  v-else-if="summaryOf(tc).path"
                   class="tn-path"
-                  :title="`在右侧面板查看 ${toolSummary(tc).path}`"
-                  @click.stop="emit('open-file', toolSummary(tc).path!)"
-                >{{ toolSummary(tc).path }}</span>
+                  :title="`在右侧面板查看 ${summaryOf(tc).path}`"
+                  @click.stop="emit('open-file', summaryOf(tc).path!)"
+                >{{ summaryOf(tc).path }}</span>
                 <Loader2 v-if="seg.running" :size="13" class="spin tn-state" />
                 <ChevronDown
                   v-else

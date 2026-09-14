@@ -42,10 +42,34 @@ export const state = reactive<AppState>({
   convsLoading: false,
   filesTick: 0,
   sidebarOpen: false,
-  rightOpen: false,
+  // 右侧面板显隐持久化：此前初值硬编码 false 且不落盘，刷新后总是回到收起态，
+  // 用户看到的现象是「有时候打不开」（上次开着、刷新后按钮点一下反而关上了）。
+  rightOpen: localStorage.getItem('lg_right_open') === '1',
 })
 
 let ws: WebSocket | null = null
+
+/**
+ * 右侧面板显隐的唯一入口。
+ *
+ * 面板状态此前散落在 4 处裸赋值 `state.rightOpen = !state.rightOpen`，加上
+ * Home.vue 里还有一份独立的 panelState（full/collapsed），两份状态叠加导致
+ * 「开着却渲染不出来」。收敛到本函数后：
+ *   - 状态落盘，刷新后可恢复；
+ *   - 打开时由调用方（Home.toggleRight）一并把 panelState 置为展开态。
+ */
+export function setRightOpen(v: boolean): void {
+  state.rightOpen = v
+  try {
+    localStorage.setItem('lg_right_open', v ? '1' : '0')
+  } catch (e) {
+    // 隐私模式下 localStorage 可能不可用：面板仍可用，只是不记忆
+  }
+}
+
+export function toggleRight(): void {
+  setRightOpen(!state.rightOpen)
+}
 
 // 会产生文件变动的内置工具：结束时刷新文件列表
 const FILE_TOOLS = new Set(['write_file', 'make_dir', 'delete_file', 'run_python'])

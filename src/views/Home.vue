@@ -8,6 +8,12 @@
 // 渲染器 chunk 会全部进入构建产物预加载，弱网下首屏直接超时。
 // 因此首次真正需要预览二进制文件时才动态加载，并显式指定运行时资产目录
 // （vite-plugin 以 copyAssets 拷贝到 /static/file-viewer/，inject 已关闭）。
+//
+// 加载时机（item 5）：由文件后缀推出的 kind 在打开前就已确定是否需要 viewer，
+// 于是「加载 viewer」和「拉取文件内容」可以并行发起，而不是等接口回来看到
+// binary=true 才开始下载那坨渲染器 —— 原来那个串行等待正是「点了文件要愣一下」的来源。
+// kind 只用来「提前决定渲染路径」，真实渲染仍以 kind 为准（见模板），
+// 不再依赖 binary 字段，避免接口的 binary 判定（服务端按字节嗅探）与后缀判定打架时出现空白面板。
 let fvReady: Promise<void> | null = null
 function ensureFileViewer(): Promise<void> {
   if (!fvReady) {
@@ -60,10 +66,11 @@ import {
 } from 'lucide-vue-next'
 import {
   state, loadConvs, loadSkills, selectConv, newChat, renameConv,
-  sendText,
+  sendText, setRightOpen, toggleRight,
 } from '../store'
 import { toolLabel } from '../utils/toolLabels'
 import { extOf } from '../utils/fileicons'
+import { previewKind, needsViewer, type PreviewKind } from '../utils/previewKind'
 import { useBreakpoint } from '../composables/useBreakpoint'
 import ChatWindow from '../components/ChatWindow.vue'
 import FilePanel from '../components/FilePanel.vue'
@@ -120,6 +127,8 @@ interface FileTab {
   content: string
   truncated: boolean
   binary: boolean
+  /** 由文件后缀推出的预览种类：决定走文本渲染还是 file-viewer，见 utils/previewKind.ts */
+  kind: PreviewKind
   note?: string
 }
 const openTabs = ref<FileTab[]>([])
@@ -131,7 +140,7 @@ const activeTabData = computed(() => openTabs.value.find((t) => t.path === activ
 /** 代码高亮视图（#66）：可高亮语言 + 内容不超阈值时返回 {html, lines, label}，否则纯文本。 */
 const hlResult = computed(() => {
   const d = activeTabData.value
-  if (!d || d.binary || !d.content) return null
+  if (!d || needsViewer(d.kind) || !d.content) return null
   const lang = EXT_LANG[extOf(d.name)]
   if (!lang || d.content.length > HL_HIGHLIGHT_MAX) return null
   try {
@@ -143,26 +152,11 @@ const hlResult = computed(() => {
   }
 })
 const tabsEl = ref<HTMLElement | null>(null)
-// 预览容器 ref + 尺寸签名：Web Component(<flyfish-file-viewer>) 不响应父级 flex 尺寸变化，
-// 面板拖宽/全屏切换后内部 canvas 不重算导致「放大不自适应」。
-// 用 ResizeObserver 监听容器尺寸，变化时 bump viewerSig 触发 :key 重挂载重绘。
-const pvViewerEl = ref<HTMLElement | null>(null)
-const viewerSig = ref(0)
-let pvRo: ResizeObserver | null = null
-let pvLastSize = ''
-function observeViewer(): void {
-  pvRo?.disconnect()
-  const el = pvViewerEl.value
-  if (!el || typeof ResizeObserver === 'undefined') return
-  pvRo = new ResizeObserver(() => {
-    const size = `${Math.round(el.clientWidth)}x${Math.round(el.clientHeight)}`
-    if (size === pvLastSize) return
-    pvLastSize = size
-    // 等布局稳定后重挂载 viewer，避免 build 期间尺寸抖动
-    void nextTick(() => { viewerSig.value++ })
-  })
-  pvRo.observe(el)
-}
+// 说明：预览容器不再用 ResizeObserver 监听尺寸后重挂 Web Component。
+// 那套做法依赖「重挂载」来让 <flyfish-file-viewer> 重算内部 canvas，但重挂
+// 会丢失组件内部状态且拖动面板时闪烁。改由 CSS 保证铺满（见 style.scss 的
+// .rp-wrap{position:relative} + .pv-viewer{position:absolute;inset:0}），
+// 组件自身 width/height:100% 即会跟随父级尺寸，无需 JS 介入。
 // 文件标签栏：鼠标滚轮横向滚动（标签多时不挤爆面板）
 function onTabsWheel(e: WheelEvent): void {
   const el = tabsEl.value
@@ -182,7 +176,7 @@ const sideIcons: { key: SideView; label: string; icon: unknown }[] = [
 /** 打开/切换文件预览标签：已存在直接切换，否则拉取内容后新开。
  *  打开文件时右面板自动展开并适当加宽（阅读/预览需要更多空间）。 */
 async function openPreviewTab(path: string, opts?: { force?: boolean }): Promise<void> {
-  if (!state.current) return
+  if (!state.current) { message.warning('请先选择或新建一个会话'); return }
   if (!opts?.force && openTabs.value.some((t) => t.path === path)) {
     activeTab.value = path
     widenPanel()
@@ -195,12 +189,16 @@ async function openPreviewTab(path: string, opts?: { force?: boolean }): Promise
       const i = openTabs.value.findIndex((t) => t.path === path)
       if (i >= 0) openTabs.value.splice(i, 1)
     }
-    const d = await api.files<{ ok: boolean; name?: string; size?: number; content?: string; truncated?: boolean; binary?: boolean; note?: string; error?: string }>(
+    // 后缀决定渲染路径：需要 viewer 就与内容请求并行开始下载，省掉一次串行等待
+    const kind = previewKind(path)
+    const viewerPromise = needsViewer(kind) ? ensureFileViewer() : null
+    const d = await api.files<{ ok: boolean; type?: string; name?: string; size?: number; content?: string; truncated?: boolean; binary?: boolean; note?: string; error?: string }>(
       state.current, path,
     )
     if (!d.ok) { message.error(d.error || '文件打开失败'); return }
-    // 二进制文件走 <flyfish-file-viewer> 渲染：激活标签前确保组件已注册
-    if (d.binary) await ensureFileViewer()
+    // 目录没有预览渲染分支，直接拦掉，避免 push 一个渲染不出内容的空标签
+    if (d.type !== 'file') { message.warning('这是一个目录，请展开查看其中的文件'); return }
+    if (viewerPromise) await viewerPromise
     openTabs.value.push({
       path,
       name: d.name ?? path.split('/').pop() ?? path,
@@ -208,6 +206,7 @@ async function openPreviewTab(path: string, opts?: { force?: boolean }): Promise
       content: d.content ?? '',
       truncated: !!d.truncated,
       binary: !!d.binary,
+      kind,
       note: d.note,
     })
     activeTab.value = path
@@ -230,9 +229,15 @@ function refreshActive(): void {
   if (activeTab.value) void openPreviewTab(activeTab.value, { force: true })
 }
 
-/** 消息附件卡片 / 工具节点路径：打开右侧面板预览工作目录文件（面板关闭时自动唤起）。 */
+/** 消息附件卡片 / 工具节点路径：打开右侧面板预览工作目录文件（面板关闭时自动唤起）。
+ *  无会话时提前提示而不是默默开一个空面板 —— 此前守卫在 openPreviewTab 里，
+ *  会出现「面板开了但什么都没有」的观感（即用户反馈的「打不开」之一）。 */
 function openAttachment(path: string): void {
-  state.rightOpen = true
+  if (!state.current) {
+    message.warning('请先选择或新建一个会话')
+    return
+  }
+  setRightOpen(true)
   void openPreviewTab(path)
 }
 
@@ -353,6 +358,20 @@ function togglePanel(): void {
   panelState.value = panelState.value === 'collapsed' ? 'full' : 'collapsed'
 }
 
+/**
+ * 右侧面板显隐开关（PC 消息头部 + 移动端 header 共用）。
+ *
+ * 打开时强制把 panelState 置为展开态：窄屏 overlay 模式下 panelVisible 要求
+ * `showRight && panelState==='full'`，而此前只有「视口变宽」这一个 watch 会把
+ * panelState 拉回 full，用户若在窄屏把它折叠过，再点开关就会 rightOpen=true
+ * 却依然渲染不出面板（表现为「打不开」）。
+ */
+function onToggleRight(): void {
+  const next = !state.rightOpen
+  setRightOpen(next)
+  if (next) panelState.value = 'full'
+}
+
 /** 收起面板：同时退出全屏（修复全屏态下点收起后 fixed 全屏仍覆盖导致"无法收起"）。 */
 function collapsePanel(): void {
   fullscreen.value = false
@@ -416,16 +435,6 @@ function downloadUrl(path: string): string {
   return state.current ? api.rawFileUrl(state.current, path) : '#'
 }
 
-// 预览切换/二进制文件出现时（重新）挂载尺寸观察器，容器变化即重挂 viewer（#2）。
-watch(
-  () => [activeTabData.value?.path, activeTabData.value?.binary, fullscreen.value, panelWidth.value] as const,
-  () => {
-    pvLastSize = ''
-    void nextTick(observeViewer)
-  },
-  { immediate: true },
-)
-
 // 视口变化时的状态收敛：变窄后退出全屏、关抽屉
 watch(
   () => [bp.isMd, bp.isXs] as const,
@@ -466,8 +475,6 @@ onBeforeUnmount(() => {
   if (pollTimer) window.clearInterval(pollTimer)
   document.body.style.userSelect = ''
   window.removeEventListener('keydown', onKeydown)
-  pvRo?.disconnect()
-  pvRo = null
 })
 </script>
 
@@ -492,7 +499,7 @@ onBeforeUnmount(() => {
           circle
           size="small"
           :title="state.rightOpen ? '收起面板' : '打开面板'"
-          @click="state.rightOpen = !state.rightOpen"
+          @click="onToggleRight"
         >
           <template #icon>
             <PanelRightClose v-if="state.rightOpen" :size="18" />
@@ -521,7 +528,7 @@ onBeforeUnmount(() => {
           circle
           size="small"
           :title="state.rightOpen ? '收起右侧面板' : '打开右侧面板'"
-          @click="state.rightOpen = !state.rightOpen"
+          @click="onToggleRight"
         >
           <template #icon>
             <PanelRightClose v-if="state.rightOpen" :size="16" />
@@ -612,7 +619,7 @@ onBeforeUnmount(() => {
         </div>
         <div class="rp-actions">
           <!-- 覆盖层模式下头部开关被面板盖住，提供面板内关闭入口 -->
-          <NButton v-if="overlay" quaternary circle size="small" title="关闭面板" @click="state.rightOpen = false">
+          <NButton v-if="overlay" quaternary circle size="small" title="关闭面板" @click="setRightOpen(false)">
             <template #icon><X :size="15" /></template>
           </NButton>
           <NButton quaternary circle size="small" title="刷新" @click="refreshActive">
@@ -657,9 +664,9 @@ onBeforeUnmount(() => {
             <NSkeleton v-for="i in 7" :key="i" :width="i % 3 === 0 ? '62%' : i % 3 === 1 ? '92%' : '78%'" height="12px" :sharp="false" />
           </div>
           <template v-else-if="activeTabData">
-            <div v-if="activeTabData.binary" ref="pvViewerEl" class="pv-viewer">
+            <div v-if="needsViewer(activeTabData.kind)" class="pv-viewer">
               <flyfish-file-viewer
-                :key="activeTabData.path + '#' + viewerSig"
+                :key="activeTabData.path"
                 :src="downloadUrl(activeTabData.path)"
                 :filename="activeTabData.name"
                 :options="{ toolbar: false }"

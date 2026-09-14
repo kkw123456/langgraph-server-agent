@@ -191,6 +191,25 @@ export interface CatalogProvider {
   model_count: number
 }
 
+/** 「添加供应商」弹框里单条待提交的提供商（前端表单 → 批量接口） */
+export interface ProviderInput {
+  name: string
+  baseUrl: string
+  apiKey: string
+  code?: string
+  status?: number
+}
+
+/** 聊天输入框模型下拉的一个选项（已按供应商分组） */
+export interface ModelOption {
+  label: string
+  value: string
+  /** 分组名：供应商名，未归属任何供应商的落在「默认」组 */
+  group?: string
+  /** 该模型的供应商名（未归属则为空），用于搜索与展示 */
+  provider?: string
+}
+
 /** 用户（admin 管理页用，不含密码字段） */export interface UserInfo {
   username: string
   role: string

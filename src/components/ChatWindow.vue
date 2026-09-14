@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, watch, nextTick, computed } from 'vue'
 import { NInput, NButton, NSelect, NRadioGroup, NRadioButton, NSkeleton } from 'naive-ui'
+import type { SelectOption } from 'naive-ui'
 import {
   Send, Sparkles, Loader2, ListChecks, Code2, FileText,
   Table2, Search, Bug, Wand2, Palette, Image, Braces, Globe, Square, X, ShieldCheck, Paperclip,
@@ -56,10 +57,33 @@ const SCENES: Record<string, { icon: unknown; title: string; desc: string; promp
 
 const scenes = Object.keys(SCENES)
 const cards = computed(() => SCENES[scene.value] || [])
-const modelOptions = computed(() =>
-  (wb.runtime.models.length ? wb.runtime.models : [wb.runtime.model]).filter(Boolean)
-    .map((m) => ({ label: m, value: m })),
-)
+/** 模型下拉按供应商分组（item 6）：
+ *  同一模型名可能挂在多个提供商下，此处按「提供商 → 模型」聚合，让用户在
+ *  输入框就能看出某个模型来自哪家；未归属任何提供商的模型落到「默认」组。
+ *  用 naive-ui 的 group 型 option，NSelect 会自动渲染成带标题的分组菜单。 */
+const modelOptions = computed<SelectOption[]>(() => {
+  const names = (wb.runtime.models.length ? wb.runtime.models : [wb.runtime.model]).filter(Boolean)
+  // 模型名 → 供应商名（一个模型只归它出现的第一个提供商，避免下拉里重复出现）
+  const owner = new Map<string, string>()
+  for (const p of wb.runtime.providers || []) {
+    const g = p.name || p.code || '未命名供应商'
+    for (const m of p.models || []) {
+      if (!owner.has(m)) owner.set(m, g)
+    }
+  }
+  const groups = new Map<string, SelectOption[]>()
+  for (const m of names) {
+    const g = owner.get(m) || '默认'
+    if (!groups.has(g)) groups.set(g, [])
+    groups.get(g)!.push({ label: m, value: m })
+  }
+  return [...groups.entries()].map(([label, children]) => ({
+    type: 'group' as const,
+    label,
+    key: label,
+    children,
+  }))
+})
 
 // 触发器宽度随当前模型名自适应，保证完整显示不截断（约 7.5px/字符 + 箭头/内边距）
 const modelW = computed(() => {
