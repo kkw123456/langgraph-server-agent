@@ -118,7 +118,11 @@ def _provider_public(p: dict) -> dict:
         "base_url": p.get("base_url", ""),
         "has_key": bool(key),
         "key_hint": f"…{key[-4:]}" if key else "",
+        # code/status/model_meta 供前端「拉取模型」匹配供应商清单、以及模型表格展示元数据
+        "code": p.get("code", ""),
+        "status": p.get("status", 1),
         "models": list(p.get("models") or []),
+        "model_meta": list(p.get("model_meta") or []),
     }
 
 

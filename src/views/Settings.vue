@@ -102,22 +102,27 @@ interface ModelRow {
   status: number
   context_length: number | null
   provider_model: string
+  description: string
   current: boolean
 }
 
 // 按分组构造表格行：从 runtime.providers[].model_meta 取元数据补全
 function modelRows(g: ProviderGroup): ModelRow[] {
   const p = (wb.runtime.providers || []).find((x) => x.name === g.name)
-  const metaMap = new Map<string, { model_type?: number; status?: number; provider_model?: string }>()
-  for (const m of p?.model_meta || []) metaMap.set(m.name, m)
+  type Meta = { model_type?: number; status?: number; provider_model?: string; context_length?: number | null; description?: string }
+  const metaMap = new Map<string, Meta>()
+  for (const m of (p?.model_meta || []) as Meta[] & { name: string }[]) {
+    metaMap.set((m as unknown as { name: string }).name, m)
+  }
   return (g.models || []).map((name) => {
     const meta = metaMap.get(name)
     return {
       name,
       model_type: meta?.model_type ?? 1,
       status: meta?.status ?? 1,
-      context_length: null,
+      context_length: meta?.context_length ?? null,
       provider_model: meta?.provider_model || '',
+      description: meta?.description || '',
       current: name === wb.runtime.model,
     }
   })
@@ -140,7 +145,12 @@ function modelColumns(g: ProviderGroup) {
         MODEL_TYPE_OPTS.find((o) => o.value === row.model_type)?.label.split(' ')[0] || 'LLM',
     },
     {
-      title: '服务商侧模型名', key: 'provider_model', width: 190, ellipsis: { tooltip: true },
+      title: '上下文', key: 'context_length', width: 88,
+      render: (row: ModelRow) =>
+        row.context_length ? `${Math.round(row.context_length / 1024)}K` : '—',
+    },
+    {
+      title: '服务商侧模型名', key: 'provider_model', width: 180, ellipsis: { tooltip: true },
       render: (row: ModelRow) => row.provider_model || '—',
     },
     {

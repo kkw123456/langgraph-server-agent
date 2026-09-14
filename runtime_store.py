@@ -270,7 +270,8 @@ class RuntimeStore:
         out = []
         for r in rows:
             mrows = self._conn().execute(
-                "SELECT name, model_type, status, provider_model FROM models "
+                "SELECT name, model_type, status, provider_model, context_length, description "
+                "FROM models "
                 "WHERE provider=? AND scope=? AND owner=? ORDER BY created_at ASC",
                 (r["name"], r["scope"], r["owner"]),
             ).fetchall()
@@ -281,7 +282,8 @@ class RuntimeStore:
                 "models": [m["name"] for m in mrows],
                 "model_meta": [
                     {"name": m["name"], "model_type": m["model_type"],
-                     "status": m["status"], "provider_model": m["provider_model"]}
+                     "status": m["status"], "provider_model": m["provider_model"],
+                     "context_length": m["context_length"], "description": m["description"]}
                     for m in mrows
                 ],
             })
