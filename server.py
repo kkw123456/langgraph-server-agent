@@ -870,8 +870,8 @@ def api_model_call_stats(request: Request, model: str = "", days: int = 7):
 def api_model_catalog(request: Request, code: str = "", provider: str = "", scope: str = "user"):
     """拉取某提供商的可选模型清单（内置清单，不联网、不外发 api_key）。
 
-    code：供应商编码（deepseek/zhipu/qwen...），未传时尝试从 provider 记录里取。
-    默认剔除该提供商下**已添加**的模型，只返回未添加项，供前端勾选批量导入。
+    code：供应商编码（deepseek/zhipu/qwen...）；provider 非空时自动取其 code 与 base_url。
+    已添加的模型会从清单中剔除（按用户可见的全部模型名去重），只返回可新增项。
     """
     user = _current_user(request)
     if scope not in ("system", "user"):
@@ -887,7 +887,10 @@ def api_model_catalog(request: Request, code: str = "", provider: str = "", scop
         if not code:
             code = p.get("code") or ""
         base_url = p.get("base_url") or ""
-        existing = runtime.provider_models(provider, scope, owner)
+
+    # 剔除口径：该用户**已可见的全部模型名**（系统默认组 + 系统提供商 + 用户私有）。
+    # 不按单个分组剔除，否则同一模型挂在不同分组下会重复出现在清单里。
+    existing = runtime.list_models(user)
 
     cat = model_catalog.catalog_for(code, existing)
     cat["base_url"] = cat.get("base_url") or base_url

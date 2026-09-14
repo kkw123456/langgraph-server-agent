@@ -287,14 +287,6 @@ class RuntimeStore:
             })
         return out
 
-    def provider_models(self, provider: str, scope: str, owner: str = "") -> list[str]:
-        """某提供商下已添加的模型名（用于拉取清单时剔除已添加项）。"""
-        rows = self._conn().execute(
-            "SELECT name FROM models WHERE provider=? AND scope=? AND owner=? ORDER BY created_at ASC",
-            (provider, scope, owner),
-        ).fetchall()
-        return [r["name"] for r in rows]
-
     def get_provider(self, name: str, scope: str, owner: str = "") -> dict | None:
         row = self._conn().execute(
             "SELECT name, scope, owner, base_url, api_key, code, status FROM providers "

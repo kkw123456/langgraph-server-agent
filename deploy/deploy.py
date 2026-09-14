@@ -25,7 +25,7 @@ APP_DIR = "/opt/langgraph-agent"
 # 需要上传的内容（相对项目根）
 INCLUDE = [
     "server.py", "config.py", "workspace.py", "workbench_store.py",
-    "users_store.py", "runtime_store.py", "requirements.txt",
+    "users_store.py", "runtime_store.py", "model_catalog.py", "requirements.txt",
     "README.md", ".env.example",
     "agent", "conversation", "skills", "tools", "auth",
     "static", "deploy/server_setup.sh",
@@ -37,7 +37,7 @@ EXCLUDE_FILES = {".env"}
 # 服务器上 ModuleNotFoundError 且只在启动日志里体现，容易漏看。
 REQUIRED_MODULES = [
     "server.py", "config.py", "workspace.py", "workbench_store.py",
-    "users_store.py", "runtime_store.py",
+    "users_store.py", "runtime_store.py", "model_catalog.py",
 ]
 
 
