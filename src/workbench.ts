@@ -7,6 +7,7 @@ import { api } from './api'
 import { message as toast } from './main'
 import type {
   Project, Automation, LibraryItem, RuntimeInfo, RuntimeProvider, AutoSchedule, UserInfo,
+  ModelCatalog, CatalogProvider,
 } from './types'
 
 interface WorkbenchState {
@@ -297,6 +298,62 @@ export async function removeProvider(name: string, scope: 'system' | 'user' = 'u
   wb.runtime.providers = r.providers || []
   if (r.model) wb.runtime.model = r.model
   return true
+}
+
+/** 拉取某提供商的可选模型清单（内置清单，不联网）。
+ *  provider 非空时由服务端读取其 code；只返回**未添加**的模型。 */
+export async function fetchCatalog(
+  code = '', provider = '', scope: 'system' | 'user' = 'user',
+): Promise<ModelCatalog | null> {
+  try {
+    const qs = new URLSearchParams()
+    if (code) qs.set('code', code)
+    if (provider) qs.set('provider', provider)
+    qs.set('scope', scope)
+    const r = await api.get<ModelCatalog>(`/api/runtime/catalog?${qs.toString()}`)
+    if (!r.ok) {
+      toast.error(r.error || '拉取模型清单失败')
+      return null
+    }
+    return r
+  } catch {
+    toast.error('拉取模型清单失败')
+    return null
+  }
+}
+
+/** 已收录供应商清单（供「添加提供商」选择 code 与预填地址）。 */
+export async function loadCatalogProviders(): Promise<CatalogProvider[]> {
+  try {
+    const r = await api.get<{ ok: boolean; providers: CatalogProvider[] }>(
+      '/api/runtime/catalog/providers',
+    )
+    return r.providers || []
+  } catch {
+    return []
+  }
+}
+
+/** 批量添加模型（勾选导入）。逐个提交，返回成功数量；失败项计入 skipped。
+ *  meta 由清单预填的 context_length 与选定的 model_type 组成。 */
+export async function addModelsBatch(
+  items: { name: string; model_type?: number; context_length?: number | null; description?: string }[],
+  provider = '', scope: 'system' | 'user' = 'user',
+): Promise<{ added: number; skipped: number }> {
+  let added = 0
+  let skipped = 0
+  for (const it of items) {
+    const ok = await addModel(it.name, provider, scope, {
+      model_type: it.model_type ?? 1,
+      context_length: it.context_length ?? null,
+      description: it.description || '',
+      provider_model: it.name,  // 清单里的名字即服务商侧真实名
+    })
+    if (ok) added += 1
+    else skipped += 1
+  }
+  if (added) toast.success(`已添加 ${added} 个模型${skipped ? `，${skipped} 个失败` : ''}`)
+  return { added, skipped }
 }
 
 // ===================== 用户管理（admin 专属，#69） =====================

@@ -21,6 +21,7 @@ from langgraph.errors import GraphInterrupt
 
 import config
 import auth as authmod
+import model_catalog
 from skills.registry import SkillRegistry
 from agent.builder import AgentManager
 from conversation.store import ConversationStore
@@ -863,6 +864,41 @@ def api_model_call_stats(request: Request, model: str = "", days: int = 7):
         visible = set(runtime.list_models(user))
         rows = [r for r in rows if r["model"] in visible]
     return {"ok": True, "days": days, "stats": rows}
+
+
+@app.get("/api/runtime/catalog", dependencies=[Depends(require_auth)])
+def api_model_catalog(request: Request, code: str = "", provider: str = "", scope: str = "user"):
+    """拉取某提供商的可选模型清单（内置清单，不联网、不外发 api_key）。
+
+    code：供应商编码（deepseek/zhipu/qwen...），未传时尝试从 provider 记录里取。
+    默认剔除该提供商下**已添加**的模型，只返回未添加项，供前端勾选批量导入。
+    """
+    user = _current_user(request)
+    if scope not in ("system", "user"):
+        scope = "user"
+    owner = "" if scope == "system" else user
+
+    existing: list[str] = []
+    base_url = ""
+    if provider:
+        p = runtime.get_provider(provider, scope, owner)
+        if p is None:
+            return {"ok": False, "error": f"提供商 {provider} 不存在或无权限"}
+        if not code:
+            code = p.get("code") or ""
+        base_url = p.get("base_url") or ""
+        existing = runtime.provider_models(provider, scope, owner)
+
+    cat = model_catalog.catalog_for(code, existing)
+    cat["base_url"] = cat.get("base_url") or base_url
+    cat["existing"] = existing
+    return {"ok": True, **cat}
+
+
+@app.get("/api/runtime/catalog/providers", dependencies=[Depends(require_auth)])
+def api_catalog_providers():
+    """已收录的供应商清单（供「添加提供商」时选择 code 与预填地址）。"""
+    return {"ok": True, "providers": model_catalog.list_providers()}
 
 
 # ===================== 会话管理（会话归属当前用户） =====================

@@ -1,17 +1,20 @@
 <script setup lang="ts">
 // 设置页：模型管理（系统模型 / 我的模型 分级）、用户管理（admin）、
 // 运行时信息、工具权限模式、退出登录。
-import { onMounted, ref, computed, reactive } from 'vue'
+import { onMounted, ref, computed, reactive, h } from 'vue'
+import type { VNodeChild } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   NCard, NRadioGroup, NRadioButton, NSelect, NButton, NTag, NInput, NEmpty, useMessage, useDialog,
+  NDataTable, NModal, NCheckbox, NCheckboxGroup, NSpin, NSpace, NAlert, NTooltip,
 } from 'naive-ui'
-import { Settings, Settings2, LogOut, RefreshCw, Cpu, ShieldCheck, Database, Check, X, Plus, Server, Users, Lock, Globe, BarChart3 } from 'lucide-vue-next'
+import { Settings, Settings2, LogOut, RefreshCw, Cpu, ShieldCheck, Database, Check, X, Plus, Server, Users, Lock, Globe, BarChart3, DownloadCloud, Trash2 } from 'lucide-vue-next'
 import { state, setMode } from '../store'
 import {
   wb, loadRuntime, setModel, addModel, removeModel, addProvider, removeProvider,
-  loadUsers, createUser, deleteUser,
+  loadUsers, createUser, deleteUser, fetchCatalog, addModelsBatch, loadCatalogProviders,
 } from '../workbench'
+import type { CatalogModel, CatalogProvider } from '../types'
 import { authState, logout as doLogout } from '../auth'
 import { api } from '../api'
 
@@ -32,6 +35,7 @@ const modelOptions = computed(() => {
 interface ProviderGroup {
   name: string; label: string; sub: string; models: string[]
   builtin: boolean; scope: 'system' | 'user'; canManage: boolean
+  code?: string          // 供应商编码，用于拉取内置模型清单
 }
 
 // 默认组模型的 scope（后端 models_scoped：[{name, scope}]）
@@ -66,6 +70,7 @@ const systemGroups = computed<ProviderGroup[]>(() => [
       builtin: false,
       scope: 'system' as const,
       canManage: isAdmin.value,
+      code: p.code || '',
     })),
 ])
 
@@ -86,8 +91,159 @@ const userGroups = computed<ProviderGroup[]>(() => [
       builtin: false,
       scope: 'user' as const,
       canManage: true,
+      code: p.code || '',
     })),
 ])
+
+// ===================== 模型列表（表格管理） =====================
+interface ModelRow {
+  name: string
+  model_type: number
+  status: number
+  context_length: number | null
+  provider_model: string
+  current: boolean
+}
+
+// 按分组构造表格行：从 runtime.providers[].model_meta 取元数据补全
+function modelRows(g: ProviderGroup): ModelRow[] {
+  const p = (wb.runtime.providers || []).find((x) => x.name === g.name)
+  const metaMap = new Map<string, { model_type?: number; status?: number; provider_model?: string }>()
+  for (const m of p?.model_meta || []) metaMap.set(m.name, m)
+  return (g.models || []).map((name) => {
+    const meta = metaMap.get(name)
+    return {
+      name,
+      model_type: meta?.model_type ?? 1,
+      status: meta?.status ?? 1,
+      context_length: null,
+      provider_model: meta?.provider_model || '',
+      current: name === wb.runtime.model,
+    }
+  })
+}
+
+// 表格列：模型名 / 类型 / 服务商侧名 / 状态 / 操作
+function modelColumns(g: ProviderGroup) {
+  return [
+    {
+      title: '模型名', key: 'name', ellipsis: { tooltip: true },
+      render: (row: ModelRow) => {
+        const parts: VNodeChild[] = [h('span', { class: 'set-mt-name' }, row.name)]
+        if (row.current) parts.push(h(NTag, { size: 'tiny', type: 'success', bordered: false }, { default: () => '当前' }))
+        return h('span', { class: 'set-mt-namewrap' }, parts)
+      },
+    },
+    {
+      title: '类型', key: 'model_type', width: 88,
+      render: (row: ModelRow) =>
+        MODEL_TYPE_OPTS.find((o) => o.value === row.model_type)?.label.split(' ')[0] || 'LLM',
+    },
+    {
+      title: '服务商侧模型名', key: 'provider_model', width: 190, ellipsis: { tooltip: true },
+      render: (row: ModelRow) => row.provider_model || '—',
+    },
+    {
+      title: '状态', key: 'status', width: 80,
+      render: (row: ModelRow) =>
+        h(NTag, { size: 'tiny', type: row.status ? 'success' : 'default', bordered: false },
+          { default: () => (row.status ? '上线' : '下线') }),
+    },
+    {
+      title: '操作', key: 'actions', width: 132, align: 'right' as const,
+      render: (row: ModelRow) => {
+        const btns: VNodeChild[] = []
+        if (!row.current) {
+          btns.push(h(NButton, {
+            size: 'tiny', tertiary: true,
+            onClick: () => onModel(row.name),
+          }, { default: () => '设为当前' }))
+        }
+        if (g.canManage) {
+          btns.push(h(NButton, {
+            size: 'tiny', quaternary: true, circle: true, type: 'error', title: '删除',
+            onClick: () => onRemoveModel(row.name, g),
+          }, { icon: () => h(Trash2, { size: 13 }) }))
+        }
+        return h('span', { class: 'set-mt-actions' }, btns)
+      },
+    },
+  ]
+}
+
+// ===================== 拉取供应商模型清单（内置清单，勾选批量导入） =====================
+const catalogOpen = ref(false)
+const catalogLoading = ref(false)
+const catalogTarget = ref<ProviderGroup | null>(null)
+const catalogModels = ref<CatalogModel[]>([])
+const catalogChecked = ref<string[]>([])
+const catalogInfo = ref<{ known: boolean; label: string; note?: string; code: string }>(
+  { known: false, label: '', code: '' },
+)
+const catalogAdding = ref(false)
+
+// 已有模型名集合（用于清单去重展示，双保险：服务端已剔除，前端再挡一次）
+const catalogColumns = [
+  { type: 'selection' as const },
+  { title: '模型名', key: 'name', ellipsis: { tooltip: true } },
+  {
+    title: '类型', key: 'model_type', width: 96,
+    render: (row: CatalogModel) =>
+      MODEL_TYPE_OPTS.find((o) => o.value === row.model_type)?.label.split(' ')[0] || 'LLM',
+  },
+  {
+    title: '上下文', key: 'context_length', width: 96,
+    render: (row: CatalogModel) =>
+      row.context_length ? `${Math.round(row.context_length / 1024)}K` : '—',
+  },
+  { title: '说明', key: 'description', ellipsis: { tooltip: true } },
+]
+
+async function openCatalog(g: ProviderGroup): Promise<void> {
+  catalogTarget.value = g
+  catalogOpen.value = true
+  catalogLoading.value = true
+  catalogChecked.value = []
+  catalogModels.value = []
+  try {
+    const cat = await fetchCatalog(g.code || '', g.name, g.scope)
+    if (!cat) {
+      catalogInfo.value = { known: false, label: '', code: '', note: '拉取失败，请重试或手动添加' }
+      return
+    }
+    // 已添加的不再展示（后端已剔除，此处兜底过滤）
+    const owned = new Set(g.models)
+    catalogModels.value = (cat.models || []).filter((m) => !owned.has(m.name))
+    catalogInfo.value = {
+      known: cat.known, label: cat.label || '', code: cat.code || '',
+      note: cat.note || (cat.known && !catalogModels.value.length ? '该供应商的模型都已添加' : ''),
+    }
+  } finally {
+    catalogLoading.value = false
+  }
+}
+
+async function submitCatalog(): Promise<void> {
+  const g = catalogTarget.value
+  if (!g || !catalogChecked.value.length) {
+    message.warning('请先勾选要添加的模型')
+    return
+  }
+  const picked = new Set(catalogChecked.value)
+  const items = catalogModels.value
+    .filter((m) => picked.has(m.name))
+    .map((m) => ({
+      name: m.name, model_type: m.model_type,
+      context_length: m.context_length ?? null, description: m.description || '',
+    }))
+  catalogAdding.value = true
+  try {
+    await addModelsBatch(items, g.name, g.scope)
+    catalogOpen.value = false
+  } finally {
+    catalogAdding.value = false
+  }
+}
 
 // 每个分组的「添加模型」输入框内容（key 带 scope 防串）
 const groupInputs = reactive<Record<string, string>>({})
@@ -100,25 +256,8 @@ const MODEL_TYPE_OPTS = [
 function gKey(g: ProviderGroup): string {
   return `${g.scope}:${g.name}`
 }
-// 「高级选项」：模型元数据（类型/上下文/描述/服务商侧模型名）——展开时才提交
-const showModelAdv = reactive<Record<string, boolean>>({})
-const modelMeta = reactive<Record<string, {
-  model_type: number; context_length: string; description: string; provider_model: string
-}>>({})
-function advKey(g: ProviderGroup): string {
-  return `adv:${g.scope}:${g.name}`
-}
-function metaOf(g: ProviderGroup) {
-  const k = gKey(g)
-  if (!modelMeta[k]) {
-    modelMeta[k] = { model_type: 1, context_length: '', description: '', provider_model: '' }
-  }
-  return modelMeta[k]
-}
-function toggleAdv(g: ProviderGroup): void {
-  const k = advKey(g)
-  showModelAdv[k] = !showModelAdv[k]
-}
+// 手动添加模型：仅用默认元数据（类型 LLM / 上线），provider_model 回填同名，
+// 后续需要调类型或上下文时可在列表中修改（避免表单越堆越复杂）。
 async function onAddModelTo(group: ProviderGroup): Promise<void> {
   const k = gKey(group)
   const name = (groupInputs[k] || '').trim()
@@ -126,24 +265,10 @@ async function onAddModelTo(group: ProviderGroup): Promise<void> {
     message.warning('请输入模型名称')
     return
   }
-  const m = metaOf(group)
-  const ctx = m.context_length.trim() ? Number(m.context_length) : null
-  if (ctx !== null && (!Number.isFinite(ctx) || ctx <= 0)) {
-    message.warning('上下文窗口需为正整数，或留空')
-    return
-  }
-  const meta = showModelAdv[advKey(group)]
-    ? {
-        model_type: m.model_type,
-        context_length: ctx,
-        description: m.description.trim(),
-        provider_model: m.provider_model.trim(),
-      }
-    : undefined
-  if (await addModel(name, group.name, group.scope, meta)) {
+  if (await addModel(name, group.name, group.scope, {
+    model_type: 1, provider_model: name,
+  })) {
     groupInputs[k] = ''
-    // 添加成功后重置高级选项，避免污染下一个模型
-    modelMeta[k] = { model_type: 1, context_length: '', description: '', provider_model: '' }
   }
 }
 function onRemoveModel(m: string, group: ProviderGroup): void {
@@ -173,6 +298,21 @@ const pKey = ref('')
 const pCode = ref('')
 const pScope = ref<'system' | 'user'>('user')
 const addingProvider = ref(false)
+// 已收录供应商（用于选 code；未收录也可留空，后续只能手输模型名）
+const catalogProviders = ref<CatalogProvider[]>([])
+const catalogProviderOpts = computed(() =>
+  catalogProviders.value.map((p) => ({
+    label: `${p.label}（${p.code}，${p.model_count} 个模型）`,
+    value: p.code,
+  })),
+)
+// 选中供应商后自动预填接口地址与名称（用户仍可改）
+function onPickProviderCode(code: string | null): void {
+  const p = catalogProviders.value.find((x) => x.code === code)
+  if (!p) return
+  if (!pUrl.value.trim()) pUrl.value = p.base_url
+  if (!pName.value.trim()) pName.value = p.label
+}
 async function submitProvider(): Promise<void> {
   const name = pName.value.trim()
   const url = pUrl.value.trim()
@@ -275,6 +415,7 @@ function onLogout(): void {
 onMounted(() => {
   void loadRuntime()
   void loadCallStats()
+  void loadCatalogProviders().then((list) => { catalogProviders.value = list })
   if (isAdmin.value) void loadUsers()
 })
 </script>
@@ -322,7 +463,11 @@ onMounted(() => {
                 </NButton>
                 <template v-else>
                   <NInput v-model:value="pName" class="set-prov-input" size="small" placeholder="名称，如 DeepSeek" :disabled="addingProvider" />
-                  <NInput v-model:value="pCode" class="set-prov-input" size="small" placeholder="编码（可选）deepseek" :disabled="addingProvider" />
+                  <NSelect
+                    v-model:value="pCode" class="set-prov-input" size="small" clearable filterable
+                    :options="catalogProviderOpts" placeholder="供应商（可选，便于拉取模型）"
+                    :disabled="addingProvider" @update:value="onPickProviderCode"
+                  />
                   <NInput v-model:value="pUrl" class="set-prov-input set-prov-url" size="small" placeholder="接口地址 https://…" :disabled="addingProvider" />
                   <NInput v-model:value="pKey" class="set-prov-input" size="small" type="password" show-password-on="click" placeholder="API Key（可选）" :disabled="addingProvider" @keyup.enter="submitProvider" />
                   <NRadioGroup v-if="isAdmin" v-model:value="pScope" size="small">
@@ -341,61 +486,46 @@ onMounted(() => {
               <span class="muted tiny">{{ isAdmin ? '全员可见，管理员可修改' : '全员可见，仅管理员可修改' }}</span>
             </div>
             <template v-for="g in systemGroups" :key="'sys-' + (g.name || '__default__')">
-              <div class="set-row set-row-top set-prov-group">
-                <span class="set-label set-prov-label">
-                  <Server :size="13" />
-                  <span class="set-prov-name">{{ g.label }}</span>
-                  <span class="set-prov-sub muted">{{ g.sub }}</span>
-                  <NButton
-                    v-if="!g.builtin && g.canManage"
-                    quaternary circle size="tiny" type="error" title="删除提供商"
-                    @click="onRemoveProvider(g)"
-                  >
-                    <template #icon><X :size="12" /></template>
-                  </NButton>
-                </span>
-                <span class="set-val set-model-list">
-                  <span v-for="m in g.models" :key="'sys-' + g.name + m" class="set-model-chip" :class="{ current: m === wb.runtime.model }">
-                    <span class="set-model-name">{{ m }}</span>
-                    <NTag v-if="m === wb.runtime.model" size="tiny" type="success" :bordered="false">当前</NTag>
-                    <NButton quaternary circle size="tiny" class="set-model-btn" title="设为当前" @click="onModel(m)">
-                      <template #icon><Check :size="13" /></template>
-                    </NButton>
-                    <NButton v-if="g.canManage" quaternary circle size="tiny" class="set-model-btn" title="删除" @click="onRemoveModel(m, g)">
-                      <template #icon><X :size="13" /></template>
+              <div class="set-row set-row-top set-prov-group set-prov-block">
+                <div class="set-prov-head">
+                  <span class="set-label set-prov-label">
+                    <Server :size="13" />
+                    <span class="set-prov-name">{{ g.label }}</span>
+                    <span class="set-prov-sub muted">{{ g.sub }}</span>
+                    <NTag v-if="g.code" size="tiny" :bordered="false" type="info">{{ g.code }}</NTag>
+                    <NButton
+                      v-if="!g.builtin && g.canManage"
+                      quaternary circle size="tiny" type="error" title="删除提供商"
+                      @click="onRemoveProvider(g)"
+                    >
+                      <template #icon><X :size="12" /></template>
                     </NButton>
                   </span>
-                  <span v-if="!g.models.length" class="muted tiny">暂无模型</span>
-                  <span v-if="g.canManage" class="set-val-inline set-prov-add">
+                  <span v-if="g.canManage" class="set-prov-tools">
+                    <NButton size="tiny" secondary @click="openCatalog(g)">
+                      <template #icon><DownloadCloud :size="13" /></template>
+                      拉取模型
+                    </NButton>
                     <NInput
                       v-model:value="groupInputs[gKey(g)]"
-                      class="set-model-input" size="tiny" placeholder="添加模型名" clearable
+                      class="set-model-input" size="tiny" placeholder="手动输入模型名" clearable
                       @keyup.enter="onAddModelTo(g)"
                     />
-                    <NButton size="tiny" secondary @click="onAddModelTo(g)">添加</NButton>
-                    <NButton size="tiny" quaternary :title="showModelAdv[advKey(g)] ? '收起高级选项' : '高级选项（类型/上下文/描述）'" @click="toggleAdv(g)">
-                      <template #icon><Settings2 :size="13" /></template>
-                    </NButton>
+                    <NButton size="tiny" tertiary @click="onAddModelTo(g)">添加</NButton>
                   </span>
-                </span>
-                <div v-if="g.canManage && showModelAdv[advKey(g)]" class="set-model-adv">
-                  <NSelect
-                    v-model:value="metaOf(g).model_type" class="set-adv-field" size="tiny"
-                    :options="MODEL_TYPE_OPTS" placeholder="模型类型"
-                  />
-                  <NInput
-                    v-model:value="metaOf(g).context_length" class="set-adv-field" size="tiny"
-                    placeholder="上下文窗口，如 128000"
-                  />
-                  <NInput
-                    v-model:value="metaOf(g).provider_model" class="set-adv-field" size="tiny"
-                    placeholder="服务商侧模型名（可选，如 gpt-4o）"
-                  />
-                  <NInput
-                    v-model:value="metaOf(g).description" class="set-adv-field set-adv-wide" size="tiny"
-                    placeholder="描述（可选）"
-                  />
                 </div>
+                <NDataTable
+                  v-if="g.models.length"
+                  class="set-model-table"
+                  size="small"
+                  :bordered="false"
+                  :single-line="false"
+                  :row-key="(r: ModelRow) => r.name"
+                  :columns="modelColumns(g)"
+                  :data="modelRows(g)"
+                  :max-height="260"
+                />
+                <NEmpty v-else size="small" description="暂无模型，可「拉取模型」勾选导入或手动输入" class="set-model-empty" />
               </div>
             </template>
 
@@ -405,65 +535,113 @@ onMounted(() => {
               <span class="muted tiny">仅自己可见与使用</span>
             </div>
             <template v-for="g in userGroups" :key="'usr-' + (g.name || '__default__')">
-              <div class="set-row set-row-top set-prov-group">
-                <span class="set-label set-prov-label">
-                  <Server :size="13" />
-                  <span class="set-prov-name">{{ g.label }}</span>
-                  <span class="set-prov-sub muted">{{ g.sub }}</span>
-                  <NButton
-                    v-if="!g.builtin && g.canManage"
-                    quaternary circle size="tiny" type="error" title="删除提供商"
-                    @click="onRemoveProvider(g)"
-                  >
-                    <template #icon><X :size="12" /></template>
-                  </NButton>
-                </span>
-                <span class="set-val set-model-list">
-                  <span v-for="m in g.models" :key="'usr-' + g.name + m" class="set-model-chip" :class="{ current: m === wb.runtime.model }">
-                    <span class="set-model-name">{{ m }}</span>
-                    <NTag v-if="m === wb.runtime.model" size="tiny" type="success" :bordered="false">当前</NTag>
-                    <NButton quaternary circle size="tiny" class="set-model-btn" title="设为当前" @click="onModel(m)">
-                      <template #icon><Check :size="13" /></template>
-                    </NButton>
-                    <NButton v-if="g.canManage" quaternary circle size="tiny" class="set-model-btn" title="删除" @click="onRemoveModel(m, g)">
-                      <template #icon><X :size="13" /></template>
+              <div class="set-row set-row-top set-prov-group set-prov-block">
+                <div class="set-prov-head">
+                  <span class="set-label set-prov-label">
+                    <Server :size="13" />
+                    <span class="set-prov-name">{{ g.label }}</span>
+                    <span class="set-prov-sub muted">{{ g.sub }}</span>
+                    <NTag v-if="g.code" size="tiny" :bordered="false" type="info">{{ g.code }}</NTag>
+                    <NButton
+                      v-if="!g.builtin && g.canManage"
+                      quaternary circle size="tiny" type="error" title="删除提供商"
+                      @click="onRemoveProvider(g)"
+                    >
+                      <template #icon><X :size="12" /></template>
                     </NButton>
                   </span>
-                  <span v-if="!g.models.length" class="muted tiny">暂无模型</span>
-                  <span v-if="g.canManage" class="set-val-inline set-prov-add">
+                  <span v-if="g.canManage" class="set-prov-tools">
+                    <NButton size="tiny" secondary @click="openCatalog(g)">
+                      <template #icon><DownloadCloud :size="13" /></template>
+                      拉取模型
+                    </NButton>
                     <NInput
                       v-model:value="groupInputs[gKey(g)]"
-                      class="set-model-input" size="tiny" placeholder="添加模型名" clearable
+                      class="set-model-input" size="tiny" placeholder="手动输入模型名" clearable
                       @keyup.enter="onAddModelTo(g)"
                     />
-                    <NButton size="tiny" secondary @click="onAddModelTo(g)">添加</NButton>
-                    <NButton size="tiny" quaternary :title="showModelAdv[advKey(g)] ? '收起高级选项' : '高级选项（类型/上下文/描述）'" @click="toggleAdv(g)">
-                      <template #icon><Settings2 :size="13" /></template>
-                    </NButton>
+                    <NButton size="tiny" tertiary @click="onAddModelTo(g)">添加</NButton>
                   </span>
-                </span>
-                <div v-if="g.canManage && showModelAdv[advKey(g)]" class="set-model-adv">
-                  <NSelect
-                    v-model:value="metaOf(g).model_type" class="set-adv-field" size="tiny"
-                    :options="MODEL_TYPE_OPTS" placeholder="模型类型"
-                  />
-                  <NInput
-                    v-model:value="metaOf(g).context_length" class="set-adv-field" size="tiny"
-                    placeholder="上下文窗口，如 128000"
-                  />
-                  <NInput
-                    v-model:value="metaOf(g).provider_model" class="set-adv-field" size="tiny"
-                    placeholder="服务商侧模型名（可选，如 gpt-4o）"
-                  />
-                  <NInput
-                    v-model:value="metaOf(g).description" class="set-adv-field set-adv-wide" size="tiny"
-                    placeholder="描述（可选）"
-                  />
                 </div>
+                <NDataTable
+                  v-if="g.models.length"
+                  class="set-model-table"
+                  size="small"
+                  :bordered="false"
+                  :single-line="false"
+                  :row-key="(r: ModelRow) => r.name"
+                  :columns="modelColumns(g)"
+                  :data="modelRows(g)"
+                  :max-height="260"
+                />
+                <NEmpty v-else size="small" description="暂无模型，可「拉取模型」勾选导入或手动输入" class="set-model-empty" />
               </div>
             </template>
           </div>
         </NCard>
+
+        <!-- 拉取供应商模型清单：勾选批量导入 -->
+        <NModal
+          v-model:show="catalogOpen"
+          preset="card"
+          class="set-catalog-modal"
+          :title="`拉取模型 · ${catalogTarget?.label || ''}`"
+          :style="{ width: '720px', maxWidth: '94vw' }"
+        >
+          <div class="set-catalog-head">
+            <span class="muted tiny">
+              供应商 <b>{{ catalogInfo.label || '未识别' }}</b>
+              <template v-if="catalogInfo.code">（code: {{ catalogInfo.code }}）</template>
+            </span>
+            <span class="set-catalog-count muted tiny">
+              已选 {{ catalogChecked.length }} / 可选 {{ catalogModels.length }}
+            </span>
+          </div>
+          <NAlert v-if="catalogInfo.note" type="warning" :bordered="false" class="set-catalog-alert">
+            {{ catalogInfo.note }}
+          </NAlert>
+          <NSpin :show="catalogLoading">
+            <NDataTable
+              v-if="catalogModels.length"
+              size="small"
+              :bordered="false"
+              :row-key="(r: CatalogModel) => r.name"
+              :columns="catalogColumns"
+              :data="catalogModels"
+              :checked-row-keys="catalogChecked"
+              :max-height="380"
+              @update:checked-row-keys="(keys: (string | number)[]) => catalogChecked = keys.map(String)"
+            />
+            <NEmpty v-else-if="!catalogLoading" size="small" description="没有可添加的模型" />
+            <div v-else class="set-catalog-loading muted tiny">正在读取清单…</div>
+          </NSpin>
+          <template #footer>
+            <div class="set-catalog-foot">
+              <span class="muted tiny">
+                勾选后点击「添加」批量导入；清单为内置参考，名称可能过时，也可直接手输。
+              </span>
+              <NSpace>
+                <NButton
+                  size="small" quaternary
+                  :disabled="!catalogModels.length"
+                  @click="catalogChecked = catalogChecked.length === catalogModels.length
+                    ? [] : catalogModels.map((m) => m.name)"
+                >
+                  {{ catalogChecked.length === catalogModels.length && catalogModels.length ? '取消全选' : '全选' }}
+                </NButton>
+                <NButton size="small" @click="catalogOpen = false">取消</NButton>
+                <NButton
+                  size="small" type="primary"
+                  :loading="catalogAdding"
+                  :disabled="!catalogChecked.length"
+                  @click="submitCatalog"
+                >
+                  添加 {{ catalogChecked.length ? `(${catalogChecked.length})` : '' }}
+                </NButton>
+              </NSpace>
+            </div>
+          </template>
+        </NModal>
 
         <!-- 模型调用统计（对齐模型库 ai_model_call_log） -->
         <NCard size="small" title="模型调用统计">

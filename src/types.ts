@@ -162,8 +162,36 @@ export interface RuntimeProvider {
   model_meta?: RuntimeModelMeta[]
 }
 
-/** 用户（admin 管理页用，不含密码字段） */
-export interface UserInfo {
+/** 供应商清单中的单个可选项（内置清单，供勾选批量导入） */
+export interface CatalogModel {
+  name: string
+  model_type: number        // 1LLM 2向量 3多模态
+  context_length?: number
+  description?: string
+}
+
+/** 拉取到的供应商模型清单 */
+export interface ModelCatalog {
+  ok: boolean
+  known: boolean            // 是否收录了该供应商
+  code?: string
+  label?: string
+  base_url?: string
+  models: CatalogModel[]
+  existing?: string[]       // 该提供商下已添加的模型名
+  note?: string
+  error?: string
+}
+
+/** 已收录供应商（供添加提供商时选择） */
+export interface CatalogProvider {
+  code: string
+  label: string
+  base_url: string
+  model_count: number
+}
+
+/** 用户（admin 管理页用，不含密码字段） */export interface UserInfo {
   username: string
   role: string
   created_at: number

@@ -1214,3 +1214,43 @@ body {
 .qcard,
 .ma-card { transition: background .15s ease, border-color .15s ease, transform .15s ease; }
 .qcard:hover { transform: translateY(-1px); }
+
+/* ============================================================
+   模型列表化管理（表格 + 拉取供应商清单勾选导入）
+   ============================================================ */
+.set-prov-block { flex-direction: column; align-items: stretch; gap: 8px; }
+.set-prov-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; flex-wrap: wrap;
+}
+.set-prov-tools {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  margin-left: auto;
+}
+.set-model-table {
+  border: 1px solid var(--border, rgba(128, 128, 128, .18));
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--panel);
+}
+.set-model-empty { padding: 14px 0 18px; }
+.set-mt-namewrap { display: inline-flex; align-items: center; gap: 6px; }
+.set-mt-name { font-family: "SF Mono", Consolas, monospace; font-size: 12px; }
+.set-mt-actions { display: inline-flex; align-items: center; gap: 6px; justify-content: flex-end; }
+
+/* 拉取清单弹窗 */
+.set-catalog-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; margin-bottom: 10px; flex-wrap: wrap;
+}
+.set-catalog-count { font-variant-numeric: tabular-nums; }
+.set-catalog-alert { margin-bottom: 10px; }
+.set-catalog-loading { padding: 28px 0; text-align: center; }
+.set-catalog-foot {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap;
+}
+@media (max-width: 767px) {
+  .set-prov-tools { width: 100%; margin-left: 0; }
+  .set-prov-tools .set-model-input { flex: 1 1 auto; min-width: 0; }
+}
