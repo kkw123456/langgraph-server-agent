@@ -305,7 +305,7 @@ body {
   overscroll-behavior: contain;
 }
 /* 气泡列与输入框同宽（--chat-w），左右边缘对齐 */
-.msg { display: flex; gap: 10px; padding: 8px 0; max-width: var(--chat-w); width: 100%; margin: 0 auto; }
+.msg { display: flex; gap: 10px; padding: 9px 0; max-width: var(--chat-w); width: 100%; margin: 0 auto; }
 /* 用户消息镜像排布：头像在最右，气泡在头像左侧 */
 .msg.user { flex-direction: row-reverse; }
 .avatar { flex: 0 0 auto; margin-top: 2px; color: #fff !important; }
@@ -317,30 +317,72 @@ body {
   width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
   background: var(--accent-grad); color: #fff; box-shadow: 0 1px 4px rgba(24, 160, 88, .22);
 }
+/* 气泡：两侧各让出头像位（32px 头像 + 10px gap），AI 与用户共享同一内容带，边界对称。
+   内边距略放大 + 行高放松，长文阅读更舒展；圆角按发送方切一角，方向感更明确。 */
 .bubble {
-  padding: 10px 14px; border-radius: 16px; line-height: 1.65; font-size: 14px;
+  padding: 11px 15px; border-radius: 16px; line-height: 1.72; font-size: 14px;
   white-space: pre-wrap; word-break: break-word;
-  /* 两侧各让出头像位（32px 头像 + 10px gap）：AI 与用户气泡共享同一内容带，边界完全对称 */
   max-width: calc(100% - 84px); min-width: 0;
+  transition: box-shadow .18s ease;
 }
+/* 用户消息：渐变实底 + 轻投影，权重更高便于在长会话中快速定位自己的提问 */
 .msg.user .bubble {
   background: var(--accent-grad); color: #fff;
-  border-bottom-right-radius: 5px; box-shadow: 0 2px 10px rgba(24, 160, 88, .26);
+  border-bottom-right-radius: 6px;
+  box-shadow: 0 2px 10px rgba(24, 160, 88, .24);
+  font-weight: 500; letter-spacing: .1px;
 }
+.msg.user .bubble:hover { box-shadow: 0 3px 14px rgba(24, 160, 88, .3); }
+/* AI 消息：浅底 + 描边（明确区分于页面背景，长段 markdown 更易读） */
 .msg.assistant .bubble {
-  background: var(--panel); border: 1px solid transparent; border-bottom-left-radius: 5px;
-  box-shadow: 0 1px 5px rgba(31, 35, 40, .06);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-bottom-left-radius: 6px;
+  box-shadow: 0 1px 5px rgba(31, 35, 40, .05);
 }
 /* 用户消息内 plain 文本的行高保持一致 */
-.user-text { white-space: pre-wrap; }
+.user-text { white-space: pre-wrap; word-break: break-word; }
 
-/* 流式光标：细圆角竖条平滑呼吸（替代生硬的方块闪烁） */
-.cursor {
-  display: inline-block; width: 2.5px; height: 1.05em; border-radius: 2px;
-  background: var(--accent); margin-left: 2px; vertical-align: -0.18em;
-  animation: cursor-pulse 1s ease-in-out infinite;
+/* ---- 「AI 回复中」指示器：渐变流光文字 + 三点依次跳动 ----
+   替代原先的竖条光标：光标只能表达「还在输出」，看不出是谁在输出；
+   文字 + 动效让等待状态与错误/停顿时更容易区分。 */
+.reply-live {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 2px 0 0; margin-top: 4px;
 }
-@keyframes cursor-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .15; } }
+.reply-live-text {
+  font-size: 13px; font-weight: 600; letter-spacing: .2px;
+  /* 渐变文字：背景裁切到文字，再让背景横向流动形成变色特效 */
+  background: linear-gradient(90deg,
+    var(--muted) 0%, var(--accent) 25%, #6ee7a8 50%, var(--accent) 75%, var(--muted) 100%);
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  animation: reply-shimmer 2.2s linear infinite;
+}
+@keyframes reply-shimmer {
+  0%   { background-position: 0% 50%; }
+  100% { background-position: -220% 50%; }
+}
+.reply-live-dots { display: inline-flex; gap: 4px; align-items: center; }
+.reply-live-dots i {
+  width: 5px; height: 5px; border-radius: 50%;
+  background: var(--accent);
+  animation: reply-dot 1.25s ease-in-out infinite;
+}
+.reply-live-dots i:nth-child(2) { animation-delay: .18s; }
+.reply-live-dots i:nth-child(3) { animation-delay: .36s; }
+@keyframes reply-dot {
+  0%, 60%, 100% { transform: translateY(0) scale(.85); opacity: .35; }
+  30%           { transform: translateY(-4px) scale(1);  opacity: 1; }
+}
+/* 尊重系统「减弱动态效果」：关掉位移动画，只保留静态可见的提示 */
+@media (prefers-reduced-motion: reduce) {
+  .reply-live-text { animation: none; background-position: 25% 50%; }
+  .reply-live-dots i { animation: none; opacity: .7; }
+}
 
 /* ---- Markdown 正文排版 ---- */
 .md { white-space: normal; min-width: 0; }
@@ -432,8 +474,8 @@ body {
 .tn-state { flex: 0 0 auto; color: var(--accent); margin-left: auto; } /* 收起/展开 icon 固定在最右 */
 .tn-done { color: var(--ok); }
 
-/* ---- 等待模型回复的 shimmer 占位 ---- */
-.waiting-bubble { display: inline-flex; align-items: center; gap: 10px; }
+/* ---- 等待模型回复：气泡内只用 ReplyLive 指示器，无需额外排版 ---- */
+.waiting-bubble { display: inline-flex; align-items: center; }
 
 /* ---- 消息区骨架屏（#60）：模拟对话布局；宽度与输入框/气泡对齐（#2） ---- */
 .msg-skeleton {
@@ -446,18 +488,6 @@ body {
 .skel-avatar { flex: 0 0 auto; margin-top: 2px; }
 .skel-bubbles { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .skel-row.mine .skel-bubbles { align-items: flex-end; }
-.waiting-text { font-size: 13px; font-weight: 550; color: var(--muted); }
-.dots { display: inline-flex; gap: 4px; align-items: center; }
-.dots i {
-  width: 5px; height: 5px; border-radius: 50%; background: var(--accent);
-  animation: dot-bounce 1.2s ease-in-out infinite;
-}
-.dots i:nth-child(2) { animation-delay: .18s; }
-.dots i:nth-child(3) { animation-delay: .36s; }
-@keyframes dot-bounce {
-  0%, 60%, 100% { transform: translateY(0); opacity: .45; }
-  30% { transform: translateY(-4px); opacity: 1; }
-}
 
 /* ---- 发送/停止按钮 ---- */
 .stop-btn { animation: pop-in .16s ease; }

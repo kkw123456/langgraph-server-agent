@@ -294,6 +294,14 @@ export async function selectConv(id: string): Promise<void> {
     const d = await api.get<{ meta?: Conversation; messages?: Message[] }>(`/api/conversations/${id}`)
     state.convTitle = d.meta ? d.meta.title : '未选择会话'
     state.messages = d.messages ?? []
+    // 该会话若仍有一轮在跑（刷新页面场景），先按「回复中」渲染：
+    // 用户消息已由后端在开跑时就落库，所以刷新后能立刻看到自己发的内容 +
+    // 「AI 回复中…」动效；随后 WS 的 resume 事件会把已发生的流式内容补齐。
+    // 若不预置，加载到 resume 到达之间会短暂显示成「这轮没有回复」。
+    if (d.meta && d.meta.running) {
+      state.running = true
+      state.waiting = true
+    }
   } finally {
     state.loadingMsgs = false
   }

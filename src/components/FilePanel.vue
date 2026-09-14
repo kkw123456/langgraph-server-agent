@@ -1,7 +1,14 @@
 <script setup lang="ts">
 // 会话工作目录文件面板：树形层级展示（目录点击展开/收起，子层惰性加载），
 // 点击文件通过 open 事件交由右侧面板打开预览标签页。
-// store.filesTick 变化（创建文件类工具结束 / 会话完成）时自动重建并保留展开状态。
+//
+// 排序规则（与后端 api_files 保持一致，前端再排一次以防接口变更）：
+//   目录在前、文件在后，各自按名称 ASCII（近似小写字典序）升序。
+//
+// 展开状态按会话持久化：切换会话、离开页面、刷新浏览器后回到该会话，
+// 目录树保持上一次的展开/收起形态。状态存 localStorage（键按会话 id 隔离），
+// 不放在组件内 Set —— 组件随路由卸载会丢，切会话则被 clear()，
+// 这正是「工作目录一直被重置」的原因。
 import { ref, watch, computed } from 'vue'
 import { NButton, NEmpty, NScrollbar, NAlert } from 'naive-ui'
 import {
@@ -31,8 +38,39 @@ const cid = computed(() => state.current)
 const tree = ref<TreeNode[]>([])
 const loading = ref(false)
 const error = ref('')
-// 记录展开过的目录，刷新后按路径恢复
-const expandedPaths = new Set<string>()
+
+// ---------------- 展开状态持久化（按会话） ----------------
+const LS_PREFIX = 'lg_tree_expand_'
+
+function loadExpanded(id: string): Set<string> {
+  try {
+    const raw = localStorage.getItem(LS_PREFIX + id)
+    if (!raw) return new Set()
+    const arr = JSON.parse(raw)
+    return new Set(Array.isArray(arr) ? arr.filter((x) => typeof x === 'string') : [])
+  } catch {
+    return new Set()   // 隐私模式 / 脏数据：退化为「全部收起」，不影响功能
+  }
+}
+
+function saveExpanded(id: string, set: Set<string>): void {
+  try {
+    localStorage.setItem(LS_PREFIX + id, JSON.stringify([...set]))
+  } catch {
+    // localStorage 不可用：本次会话内仍可正常展开，只是不记忆
+  }
+}
+
+// 当前会话的展开集合（切会话时整体替换）
+let expandedPaths = new Set<string>()
+let saveTimer = 0
+/** 防抖落盘：连续展开多个目录时只写一次 localStorage。 */
+function persistExpanded(): void {
+  const id = cid.value
+  if (!id) return
+  clearTimeout(saveTimer)
+  saveTimer = window.setTimeout(() => saveExpanded(id, expandedPaths), 250)
+}
 
 function joinPath(base: string, name: string): string {
   return base ? `${base}/${name}` : name
@@ -50,8 +88,16 @@ function fmtTime(t: number): string {
   return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
 }
 
+/** 目录优先 + 名称 ASCII 升序（与后端 api_files 同口径）。 */
+function sortEntries(list: FileEntry[]): FileEntry[] {
+  return [...list].sort((a, b) => {
+    if (a.type !== b.type) return a.type === 'dir' ? -1 : 1
+    return a.name.toLowerCase().localeCompare(b.name.toLowerCase())
+  })
+}
+
 function toNodes(path: string, entries: FileEntry[]): TreeNode[] {
-  return entries.map((e) => ({
+  return sortEntries(entries).map((e) => ({
     name: e.name,
     path: joinPath(path, e.name),
     type: e.type,
@@ -76,7 +122,8 @@ async function rebuild(auto = false): Promise<void> {
   error.value = ''
   try {
     tree.value = await listDir('')
-    // 首次加载该会话：根目录条目不足 5 个时，自动展开所有子目录一层，减少无效点击
+    // 首次打开一个从未展开过的会话（且根目录条目不多）：自动展开子目录一层，
+    // 减少「点开一片空」的无效点击。已有记录则完全尊重用户的展开状态。
     if (auto && tree.value.length < 5) {
       for (const n of tree.value) {
         if (n.type !== 'dir') continue
@@ -84,11 +131,13 @@ async function rebuild(auto = false): Promise<void> {
           n.expanded = true
           n.loaded = true
           n.children = await listDir(n.path)
+          expandedPaths.add(n.path)
         } catch {
           n.expanded = false
           n.loaded = false
         }
       }
+      persistExpanded()
     }
     // 递归恢复已展开目录的内容
     const restore = async (nodes: TreeNode[]): Promise<void> => {
@@ -96,7 +145,17 @@ async function rebuild(auto = false): Promise<void> {
         if (n.type === 'dir' && expandedPaths.has(n.path)) {
           n.expanded = true
           n.loaded = true
-          n.children = await listDir(n.path)
+          try {
+            n.children = await listDir(n.path)
+          } catch {
+            // 目录在别处被删掉：静默收敛展开状态，避免每次刷新都重试失败
+            n.expanded = false
+            n.loaded = false
+            n.children = null
+            expandedPaths.delete(n.path)
+            persistExpanded()
+            continue
+          }
           await restore(n.children)
         }
       }
@@ -125,8 +184,14 @@ async function toggleNode(n: TreeNode): Promise<void> {
       }
     }
   } else {
+    // 收起时连同子孙一起移出记录：重新展开时按需再加载，
+    // 也避免下次进来把「早就收起的深层目录」又铺开
     expandedPaths.delete(n.path)
+    for (const p of [...expandedPaths]) {
+      if (p.startsWith(n.path + '/')) expandedPaths.delete(p)
+    }
   }
+  persistExpanded()
 }
 
 function onClick(n: TreeNode): void {
@@ -136,6 +201,19 @@ function onClick(n: TreeNode): void {
 
 function downloadUrl(path: string): string {
   return cid.value ? api.rawFileUrl(cid.value, path) : '#'
+}
+
+/** 全部收起（一键清理，方便目录很深时快速回到顶层）。 */
+function collapseAll(): void {
+  expandedPaths.clear()
+  const walk = (nodes: TreeNode[]) => {
+    for (const n of nodes) {
+      n.expanded = false
+      if (n.children) walk(n.children)
+    }
+  }
+  walk(tree.value)
+  persistExpanded()
 }
 
 // 扁平化渲染树（缩进深度）
@@ -151,8 +229,13 @@ const flatTree = computed(() => {
   return out
 })
 
-// 会话切换：清空展开状态重载（首次加载启用「根目录 <5 项自动展开下一层」）
-watch(cid, () => { expandedPaths.clear(); rebuild(true) }, { immediate: true })
+const hasExpanded = computed(() => flatTree.value.some((f) => f.node.type === 'dir' && f.node.expanded))
+
+// 会话切换：读取该会话上次的展开状态再重建（首次打开才启用「小目录自动展开」）
+watch(cid, (id) => {
+  expandedPaths = id ? loadExpanded(id) : new Set()
+  rebuild(true)
+}, { immediate: true })
 // 工具创建文件 / 会话完成：刷新文件树（保留展开状态）
 watch(() => state.filesTick, () => { rebuild() })
 </script>
@@ -165,6 +248,12 @@ watch(() => state.filesTick, () => { rebuild() })
         <!-- 加载中用旋转 icon（#8）：不占宽度跳变，视觉更轻 -->
         <Loader2 v-if="loading" :size="13" class="spin" />
       </span>
+      <NButton
+        v-if="hasExpanded"
+        quaternary circle size="small" title="全部收起" @click="collapseAll"
+      >
+        <template #icon><ChevronRight :size="15" /></template>
+      </NButton>
       <NButton quaternary circle size="small" title="刷新文件列表" @click="rebuild()">
         <template #icon><RotateCw :size="15" /></template>
       </NButton>

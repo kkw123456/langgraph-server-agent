@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, watch, nextTick, computed } from 'vue'
 import { NInput, NButton, NSelect, NRadioGroup, NRadioButton, NSkeleton } from 'naive-ui'
+import ReplyLive from './ReplyLive.vue'
 import type { SelectOption } from 'naive-ui'
 import {
   Send, Sparkles, Loader2, ListChecks, Code2, FileText,
@@ -229,14 +230,13 @@ watch(() => state.current, () => { draft.value = '' })
 
       <template v-else>
         <MessageBubble v-for="(m, i) in state.messages" :key="'h' + i" :msg="m" @open-file="(p: string) => emit('open-file', p)" />
-        <!-- 等待模型回复：轻量占位（回复中 + 三点动画） -->
+        <!-- 等待模型首个 token：与流式尾部的指示器同款，视觉连贯不跳变 -->
         <div v-if="state.waiting && !state.live" class="msg assistant">
           <div class="avatar-holder">
             <span class="ai-badge"><Sparkles :size="15" /></span>
           </div>
           <div class="bubble waiting-bubble">
-            <span class="waiting-text">回复中</span>
-            <span class="dots" aria-label="加载中"><i></i><i></i><i></i></span>
+            <ReplyLive />
           </div>
         </div>
         <MessageBubble v-if="state.live" :msg="state.live" streaming />

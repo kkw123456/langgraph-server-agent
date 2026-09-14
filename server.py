@@ -28,6 +28,7 @@ from conversation.store import ConversationStore
 from workbench_store import WorkbenchStore
 from users_store import UserStore
 from runtime_store import RuntimeStore
+from langchain_core.messages import ToolMessage
 import workspace
 
 # 确认模式下等待用户决策的最长等待时间（秒），超时视为全部拒绝
@@ -1006,6 +1007,9 @@ def api_conv_get(request: Request, cid: str):
     meta = store.get(cid)
     if not _conv_owned(meta, _current_user(request)):
         return {"ok": False, "error": "not found"}
+    # 附带 running 标记：前端刷新页面后据此立刻渲染「AI 回复中…」动效，
+    # 不必等 WS 的 resume 事件到达（避免刷新后短暂显示成「这轮没有回复」）
+    meta = {**meta, "running": bool((RUNS.get(cid) and not RUNS[cid].done))}
     return {"ok": True, "meta": meta, "messages": store.load_messages(cid)}
 
 
@@ -1072,7 +1076,11 @@ def api_files(cid: str, path: str = ""):
     if os.path.isdir(full):
         entries = []
         try:
-            for name in sorted(os.listdir(full)):
+            # 排序规则：目录在前、文件在后，各自按名称 ASCII 升序。
+            # 只按名称排会把目录和文件混在一起，目录层级不明显；
+            # key 用小写字面量对应「近似 ASCII 序」并避免大小写分裂（A/a 相邻）。
+            names = sorted(os.listdir(full), key=lambda n: n.lower())
+            for name in names:
                 p = os.path.join(full, name)
                 st = os.stat(p)
                 is_dir = os.path.isdir(p)
@@ -1085,6 +1093,8 @@ def api_files(cid: str, path: str = ""):
                 })
         except Exception as e:
             return {"ok": False, "error": str(e)}
+        # 稳定排序：type 决定分组（dir 优先），组内保持名称序
+        entries.sort(key=lambda e: (0 if e["type"] == "dir" else 1, e["name"].lower()))
         return {"ok": True, "type": "dir", "path": path, "entries": entries}
     if os.path.isfile(full):
         try:
@@ -1295,6 +1305,18 @@ async def run_turn(cid: str, content: str, run: RunHandle | None, attachments: l
         messages.append(user_msg)
         assistant = {"role": "assistant", "content": "", "tool_calls": []}
 
+        # 乐观落库用户消息：此前只在整轮结束时才 save_messages，导致「AI 回复中
+        # 刷新页面」时这一轮的消息还没进库，用户刚发的内容在 UI 上凭空消失。
+        # 先写入用户消息（并 touch 让会话列表顺序/标题及时更新），结束时再整体
+        # 覆盖为含 AI 回复的最终版本。失败不影响本轮执行。
+        # 注意：这里**不**写空的 assistant 占位——load_messages 会把它读成一个
+        # 空气泡；「回复中」状态由 WS 的 running 事件驱动，不需要靠消息表达。
+        try:
+            store.save_messages(cid, messages)
+            store.touch(cid)
+        except Exception as e:
+            print(f"[turn] 预落库用户消息失败（忽略）: {e}")
+
         try:
             agent = agent_manager.get_agent(user)
         except Exception as e:
@@ -1307,6 +1329,10 @@ async def run_turn(cid: str, content: str, run: RunHandle | None, attachments: l
             await run.emit({"type": "message_start"})
 
         config = {"configurable": {"thread_id": cid}}
+        # 调用模型前先自愈历史：只要检查点里留有「请求了工具但没结果」的消息，
+        # 之后每次请求都会被服务商以 INVALID_CHAT_HISTORY 拒绝，且该会话永久卡死。
+        # 这里主动补齐缺失的 ToolMessage，把会话救回可用状态。
+        await _ensure_history_valid(agent, config)
         # run_id -> tool_call 映射：并行工具调用时把 on_tool_end 的输出精确归属到
         # 对应的调用上（end 事件到达顺序可能与 start 不同，不能简单取「最后一个」）
         tool_by_run: dict = {}
@@ -1318,6 +1344,7 @@ async def run_turn(cid: str, content: str, run: RunHandle | None, attachments: l
         # 首轮输入为用户消息；后续轮次为中断后的 resume 续跑。Agent 已开启
         # interrupt_before=["tools"]，因此每一次工具调用前都会在此循环中被拦截。
         first = True
+        _retried = False   # INVALID_CHAT_HISTORY 自愈重试只做一次，避免死循环
         while True:
             inp = {"messages": [("user", content)]} if first else Command(resume=True)
             first = False
@@ -1390,13 +1417,34 @@ async def run_turn(cid: str, content: str, run: RunHandle | None, attachments: l
                 interrupted = True
             except asyncio.CancelledError:
                 cancelled = True
+                # 手动停止：图可能正停在「已请求工具、尚未拿到结果」的位置，
+                # 这里就地补齐占位 ToolMessage，否则下一次对话必然 INVALID_CHAT_HISTORY
+                await _ensure_history_valid(agent, config)
                 break
             except Exception as e:
                 err = f"执行出错: {e}"
+                # 服务商因消息历史非法而拒绝（INVALID_CHAT_HISTORY / 各类 provider
+                # 的等价报错）：就地修复一次并重试，避免整个会话被永久卡死。
+                if not _retried and _is_invalid_history_error(e):
+                    _retried = True
+                    if await _ensure_history_valid(agent, config):
+                        if run:
+                            await run.emit({
+                                "type": "warn",
+                                "content": "检测到工具调用记录不完整，已自动修复并重试",
+                            })
+                        continue  # 用同一轮输入重新发起
                 _call_failed = True
                 assistant["content"] += f"\n[{err}]"
                 if run:
                     await run.emit({"type": "error", "content": err})
+                # 异常中断同样可能留下悬空 tool_call：先自愈再结束，
+                # 让用户下一次发消息还能正常用（否则会话被报错彻底锁死）
+                if await _ensure_history_valid(agent, config) and run:
+                    await run.emit({
+                        "type": "warn",
+                        "content": "已自动修复中断的工具调用记录，可以继续对话",
+                    })
                 break
 
             # astream_events 遇中断不会抛异常，需通过状态机判定是否停在 tools 前
@@ -1494,16 +1542,23 @@ async def _apply_tool_decision(agent, config, ai, decision: dict) -> list[str]:
     """按用户决策修改当前 AI 消息的 tool_calls 并续跑。
 
     - approve 的工具保留（可带编辑后的 args），随后照常执行；
-    - deny 的工具直接从 tool_calls 中移除，不再执行（不注入 ToolMessage：
-      否则 ReAct 的工具节点会认为该调用已得到结果而跳过其余工具）。
+    - deny 的工具保留 tool_call 但注入一条合成的 ToolMessage，明确告知模型
+      「该工具已被用户拒绝，不要重试」。**不能**直接删掉 tool_call——
+      那会留下「AI 请求了工具却没有结果」的悬空历史，下一轮喂给模型就是
+      INVALID_CHAT_HISTORY（AIMessage with tool_calls without ToolMessage）。
+      注入 ToolMessage 而非删除，ReAct 的工具节点会把它当作已完成的调用，
+      从而照常继续执行其余获批的工具。
     返回的被拒绝工具名用于前端提示。
     """
     action = decision.get("action", "submit")  # submit | deny | cancel
     calls = {c.get("id"): c for c in decision.get("calls", [])}
     default = "approve" if action == "submit" else "deny"
 
-    new_tcs = []
+    keep_tcs: list = []          # 保留在 AI 消息上的 tool_calls（含被拒的）
+    approved_ids: set = set()
+    denied_msgs: list = []       # 被拒工具对应的占位 ToolMessage
     denied_names: list[str] = []
+
     for tc in (ai.tool_calls or []):
         d = calls.get(tc["id"])
         approve = (d["action"] == "approve") if d else (default == "approve")
@@ -1511,14 +1566,108 @@ async def _apply_tool_decision(agent, config, ai, decision: dict) -> list[str]:
             if d and "args" in d:
                 t = dict(tc)
                 t["args"] = d["args"]
-                new_tcs.append(t)
+                keep_tcs.append(t)
             else:
-                new_tcs.append(tc)
+                keep_tcs.append(tc)
+            approved_ids.add(tc["id"])
         else:
+            # 保留调用记录，但用 ToolMessage 告诉模型它被拒绝了
+            keep_tcs.append(tc)
             denied_names.append(tc["name"])
-    new_ai = ai.model_copy(update={"tool_calls": new_tcs, "invalid_tool_calls": []})
-    await agent.aupdate_state(config, {"messages": [new_ai]})
+            denied_msgs.append(ToolMessage(
+                content=f"用户拒绝执行工具 {tc['name']}。请不要重试该调用，"
+                        f"改用其他方式完成用户需求，或直接说明无法执行。",
+                tool_call_id=tc["id"],
+                name=tc["name"],
+                status="error",
+            ))
+
+    new_ai = ai.model_copy(update={"tool_calls": keep_tcs, "invalid_tool_calls": []})
+    # 一次 aupdate_state 同时写入：改后的 AI 消息 + 被拒工具的占位结果
+    await agent.aupdate_state(config, {"messages": [new_ai, *denied_msgs]})
+
+    # 被拒的工具已由 ToolMessage 答复，需要从图状态里摘掉，避免 tools 节点重复执行。
+    # 做法：把获批的 tool_calls 重新写回 AI 消息（ToolMessage 已在历史里，
+    # 因此这一条更新不会产生新的悬空调用）。
+    if denied_names:
+        await agent.aupdate_state(config, {"messages": [ai.model_copy(
+            update={"tool_calls": [t for t in keep_tcs if t["id"] in approved_ids] or [],
+                    "invalid_tool_calls": []})]})
     return denied_names
+
+
+def _is_invalid_history_error(e: Exception) -> bool:
+    """判断异常是否属于「消息历史非法」这一类（各家服务商文案不一，做宽松匹配）。
+
+    LangGraph/OpenAI 兼容层会抛 INVALID_CHAT_HISTORY，并附带
+    "do not have a corresponding ToolMessage"；部分网关只回中文/英文短语，
+    因此同时匹配若干关键字。
+    """
+    s = str(e).lower()
+    return (
+        "invalid_chat_history" in s
+        or "do not have a corresponding toolmessage" in s
+        or ("tool_calls" in s and "toolmessage" in s)
+        or "tool_call_id" in s and "not found" in s
+        or "an assistant message with 'tool_calls' must be followed by tool messages" in s
+    )
+
+
+def _repair_dangling_tool_calls(messages: list) -> list:
+    """修复「AI 请求了工具但没有对应 ToolMessage」的历史。
+
+    这种历史一旦写进检查点就会永久卡死该会话：之后每次调用模型都会被
+    服务商以 INVALID_CHAT_HISTORY 拒绝，且报错里看不出怎么恢复。
+    触发场景：运行中途崩溃/被杀、确认模式下改写了 tool_calls、手动停止。
+
+    这里按消息顺序扫描，为每个没有结果的 tool_call 补一条说明性的
+    ToolMessage，让历史重新合法（内容说明「工具未执行完成」，模型看到后
+    会自行决定重试或换方案，而不是永远报错）。
+    """
+    if not messages:
+        return messages
+    # 已有结果的 tool_call_id
+    answered = {m.tool_call_id for m in messages if isinstance(m, ToolMessage)}
+    out: list = []
+    repaired = 0
+    for m in messages:
+        out.append(m)
+        tcs = getattr(m, "tool_calls", None) or []
+        if not tcs:
+            continue
+        for tc in tcs:
+            tcid = tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", None)
+            if not tcid or tcid in answered:
+                continue
+            tname = tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", "")
+            out.append(ToolMessage(
+                content=f"（该工具调用未执行完成，没有返回结果：{tname}）",
+                tool_call_id=tcid,
+                name=tname or "unknown",
+                status="error",
+            ))
+            answered.add(tcid)
+            repaired += 1
+    if repaired:
+        print(f"[agent] 已修复 {repaired} 个缺失结果的工具调用（避免 INVALID_CHAT_HISTORY）")
+    return out
+
+
+async def _ensure_history_valid(agent, config) -> bool:
+    """在调用模型前校验并修复该 thread 的消息历史。返回是否做过修复。"""
+    try:
+        st = await agent.aget_state(config)
+        msgs = list((st.values or {}).get("messages") or [])
+        if not msgs:
+            return False
+        fixed = _repair_dangling_tool_calls(msgs)
+        if len(fixed) == len(msgs):
+            return False
+        await agent.aupdate_state(config, {"messages": fixed})
+        return True
+    except Exception as e:
+        print(f"[agent] 历史校验失败（忽略，继续执行）: {e}")
+        return False
 
 
 # ---------- 工具函数 ----------

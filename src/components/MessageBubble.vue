@@ -11,6 +11,7 @@ import {
 import type { Component } from 'vue'
 import type { Message, ToolCall } from '../types'
 import { toolLabel } from '../utils/toolLabels'
+import ReplyLive from './ReplyLive.vue'
 import { fileIcon, extOf } from '../utils/fileicons'
 import { state } from '../store'
 import { api } from '../api'
@@ -182,28 +183,103 @@ function pick(obj: Record<string, unknown> | null, ...keys: string[]): string {
 }
 
 /** 工具节点的展示摘要。kind 用于区分路径是文件还是目录：
- *  目录不可在右侧面板预览，前端据此把路径渲染成静态文本而非可点链接。 */
+ *  目录不可在右侧面板预览，前端据此把路径渲染成静态文本而非可点链接。
+ *  intent 是「这条命令/脚本想干什么」的中文意图摘要，挂在 title 上供悬停查看。 */
 export interface ToolSummary {
   title: string
   path?: string
   kind?: 'file' | 'dir'
+  intent?: string
 }
 
-/** 语义化标题：动作名 + 关键参数摘要（url / 搜索词 / 命令等）。
- *  文件路径不再拼进标题（与 tn-path 重复），统一由 tn-path 单独展示并可点击。 */
+/** 命令意图识别：按首个可执行命令归类，输出中文短语。
+ *  目的是让用户扫一眼工具节点就知道 AI 在干什么，而不用读完整条命令。 */
+function commandIntent(cmd: string, tool: string): string {
+  const c = (cmd || '').trim()
+  if (!c) return tool === 'run_python' ? '执行 Python 脚本' : '执行命令'
+  // 多行脚本（run_python / heredoc）：看首行有效语句
+  const firstLine = c.split('\n').map((l) => l.trim()).find((l) => l && !l.startsWith('#')) || c
+  const low = firstLine.toLowerCase()
+
+  // ---- Python 脚本特征（run_python 传的是代码而非 shell 命令）----
+  if (tool === 'run_python' || /^(import|from|def |class |print\(|for |while |with )/.test(low)) {
+    if (/playwright|selenium|pyppeteer/.test(low)) return '浏览器自动化操作'
+    if (/requests|httpx|urlopen|aiohttp/.test(low)) return '发起网络请求'
+    if (/pandas|numpy|openpyxl|read_csv|dataframe/.test(low)) return '数据处理与分析'
+    if (/matplotlib|seaborn|plotly|savefig/.test(low)) return '绘制图表'
+    if (/subprocess|os\.system|popen/.test(low)) return '调用系统命令'
+    if (/open\(|read_text|write_text|pathlib/.test(low)) return '读写文件'
+    if (/asyncio|await /.test(low)) return '执行异步任务'
+    return '执行 Python 脚本'
+  }
+
+  // ---- Shell 命令 ----
+  const head = low.split(/[\s|;&]+/).filter(Boolean)
+  const prog = (head[0] || '').replace(/^.*\//, '')   // 去掉 /usr/bin/ 前缀
+  const sub = head[1] || ''
+  const joined = low
+
+  if (/^(pip|pip3|uv)$/.test(prog)) return '安装 Python 依赖'
+  if (/^(apt|apt-get|yum|dnf|apk)$/.test(prog)) {
+    return sub === 'install' ? '安装系统软件包' : `系统包管理（${sub || '操作'}）`
+  }
+  if (/^(npm|pnpm|yarn)$/.test(prog)) {
+    if (sub === 'install' || sub === 'add' || sub === 'i') return '安装前端依赖'
+    if (sub === 'run' || sub === 'build') return `前端构建（${head[2] || ''}）`.replace('（）', '')
+    return '前端包管理'
+  }
+  if (/^(git)$/.test(prog)) {
+    if (sub === 'clone') return '克隆代码仓库'
+    if (sub === 'pull' || sub === 'fetch') return '拉取代码更新'
+    if (sub === 'push') return '推送代码'
+    if (sub === 'status' || sub === 'diff' || sub === 'log') return '查看代码变更'
+    if (sub === 'commit') return '提交代码'
+    return 'Git 操作'
+  }
+  if (/^(rm|rmdir|unlink)$/.test(prog)) return /-rf|-r\b/.test(joined) ? '递归删除文件/目录' : '删除文件'
+  if (/^(cp|mv|rsync)$/.test(prog)) return prog === 'mv' ? '移动/重命名文件' : '复制文件'
+  if (/^(mkdir)$/.test(prog)) return '创建目录'
+  if (/^(touch)$/.test(prog)) return '创建空文件'
+  if (/^(cat|head|tail|less|more|wc)$/.test(prog)) return '查看文件内容'
+  if (/^(grep|rg|find|fd|locate)$/.test(prog)) return '搜索文件内容'
+  if (/^(chmod|chown)$/.test(prog)) return '修改文件权限'
+  if (/^(ls|tree|du|df)$/.test(prog)) return '查看目录/磁盘'
+  if (/^(ps|top|htop|kill|pkill|killall)$/.test(prog)) return '进程管理'
+  if (/^(systemctl|service)$/.test(prog)) return `服务管理（${sub || ''}）`.replace('（）', '')
+  if (/^(journalctl|dmesg)$/.test(prog)) return '查看系统日志'
+  if (/^(curl|wget)$/.test(prog)) return '下载/请求网络资源'
+  if (/^(docker|docker-compose|podman)$/.test(prog)) return '容器操作'
+  if (/^(python|python3|node|deno|bash|sh|zsh)$/.test(prog)) {
+    if (prog.startsWith('python')) return '运行 Python 脚本'
+    if (prog === 'node') return '运行 Node 脚本'
+    return '运行 Shell 脚本'
+  }
+  if (/^(tar|zip|unzip|gzip|7z)$/.test(prog)) return '压缩/解压文件'
+  if (/^(sed|awk|cut|sort|uniq|tr)$/.test(prog)) return '文本处理'
+  if (/^(echo|printf)$/.test(prog)) return '输出文本'
+  if (/^(export|env|source)$/.test(prog)) return '设置环境变量'
+  if (/^(nvidia-smi|lscpu|free|uname)$/.test(prog)) return '查看系统信息'
+  return '执行命令'
+}
+
 function toolSummary(tc: ToolCall): ToolSummary {
   const obj = parseInput(tc.input)
   const path = pick(obj, 'path', 'file', 'file_path', 'dir', 'directory')
   // 参数摘要截断：超长显示省略号，防止撑爆工具节点标题行
   const snip = (s: string, n = 48) => (s.length > n ? s.slice(0, n) + '…' : s)
   switch (tc.name) {
-    case 'run_python':
-      return { title: '执行脚本' }
+    case 'run_python': {
+      // 命令意图做成摘要挂在 title，悬停可见完整意图 + 原文首行
+      const code = pick(obj, 'code', 'script', 'source')
+      const intent = commandIntent(code, 'run_python')
+      return { title: intent, intent: code ? `${intent}\n\n${snip(code, 300)}` : intent }
+    }
     case 'run_command':
     case 'run_shell':
     case 'bash': {
       const cmd = pick(obj, 'command', 'cmd', 'script')
-      return { title: cmd ? `运行命令 ${snip(cmd, 42)}` : '运行命令' }
+      const intent = commandIntent(cmd, tc.name)
+      return { title: intent, intent: cmd ? `${intent}\n\n$ ${snip(cmd, 300)}` : intent }
     }
     case 'write_file':
       return { title: '添加文件', path: path || undefined, kind: 'file' }
@@ -394,7 +470,12 @@ function attachType(name: string): string {
               <!-- 点击 header 收起/展开；文件路径单独可点（在右面板打开） -->
               <div class="tn-head" @click="toggle(si, ti)">
                 <span class="tn-ico"><component :is="toolIcon(tc.name)" :size="14" /></span>
-                <span class="tn-name">{{ summaryOf(tc).title }}</span>
+                <!-- title 挂「命令意图」摘要：悬停即可看清这条命令在干什么，
+                     不必展开节点去读原始命令 -->
+                <span
+                  class="tn-name"
+                  :title="summaryOf(tc).intent ? `${toolLabel(tc.name)} · ${summaryOf(tc).intent}` : toolLabel(tc.name)"
+                >{{ summaryOf(tc).title }}</span>
                 <!-- 目录不可预览：渲染为静态文本（带文件夹图标），不响应点击 -->
                 <span
                   v-if="summaryOf(tc).path && summaryOf(tc).kind === 'dir'"
@@ -429,7 +510,8 @@ function attachType(name: string): string {
           </div>
         </template>
 
-        <span v-if="streaming" class="cursor"></span>
+        <!-- 流式输出尾部：用「AI 回复中」文字 + 动态点替代生硬的光标 -->
+        <ReplyLive v-if="streaming" />
       </template>
     </div>
 
