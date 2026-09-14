@@ -447,11 +447,14 @@ function attachType(name: string): string {
         </div>
       </template>
       <template v-else>
-        <!-- 思考过程（deepseek/ark 等模型的 reasoning_content） -->
-        <div v-if="hasThinking || thinkingNow" class="think-box" :class="{ open: thinkOpen.length }" @click="thinkOpen = thinkOpen.length ? [] : ['think']">
+        <!-- 思考过程（deepseek/ark 等模型的 reasoning_content）。
+             注意 v-if 只认 hasThinking：首 token 之前还没有任何 reasoning 内容，
+             此处不再单独渲染「正在深度思考」——那个阶段由气泡尾部的
+             ReplyLive 统一提示，两处同时显示两个动效属于重复。 -->
+        <div v-if="hasThinking" class="think-box" :class="{ open: thinkOpen.length }" @click="thinkOpen = thinkOpen.length ? [] : ['think']">
           <div class="think-head">
             <BrainCircuit :size="13" />
-            <span>{{ thinkingNow ? '正在深度思考' : '思考过程' }}</span>
+            <span>{{ thinkingNow ? 'AI 思考中…' : '思考过程' }}</span>
             <Loader2 v-if="thinkingNow" :size="12" class="spin" />
           </div>
           <div v-if="thinkOpen.length" class="think-body">{{ msg.reasoning }}</div>
@@ -510,7 +513,7 @@ function attachType(name: string): string {
           </div>
         </template>
 
-        <!-- 流式输出尾部：用「AI 回复中」文字 + 动态点替代生硬的光标 -->
+        <!-- 流式输出尾部：用「AI 思考中…」文字 + 动态点替代生硬的光标 -->
         <ReplyLive v-if="streaming" />
       </template>
     </div>

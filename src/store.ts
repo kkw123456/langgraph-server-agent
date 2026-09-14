@@ -91,7 +91,7 @@ function connectWs(id: string): void {
   }
   ws.onclose = () => {
     state.status = '○ 已断开'
-    // 异常断线兜底：等待回复阶段连接断开且无流式内容时，补提示并复位，避免界面永久卡在「回复中」
+    // 异常断线兜底：等待回复阶段连接断开且无流式内容时，补提示并复位，避免界面永久卡在「思考中」
     if (state.waiting && !state.live) {
       state.messages.push({ role: 'assistant', content: '（连接中断，请重新发送）' })
       state.waiting = false
@@ -294,9 +294,9 @@ export async function selectConv(id: string): Promise<void> {
     const d = await api.get<{ meta?: Conversation; messages?: Message[] }>(`/api/conversations/${id}`)
     state.convTitle = d.meta ? d.meta.title : '未选择会话'
     state.messages = d.messages ?? []
-    // 该会话若仍有一轮在跑（刷新页面场景），先按「回复中」渲染：
+    // 该会话若仍有一轮在跑（刷新页面场景），先按「思考中」渲染：
     // 用户消息已由后端在开跑时就落库，所以刷新后能立刻看到自己发的内容 +
-    // 「AI 回复中…」动效；随后 WS 的 resume 事件会把已发生的流式内容补齐。
+    // 「AI 思考中…」动效；随后 WS 的 resume 事件会把已发生的流式内容补齐。
     // 若不预置，加载到 resume 到达之间会短暂显示成「这轮没有回复」。
     if (d.meta && d.meta.running) {
       state.running = true
@@ -358,7 +358,7 @@ export async function renameConv(id: string, title: string): Promise<void> {
 export async function sendText(text: string, files?: File[]): Promise<void> {
   const t = (text || '').trim()
   if (!t && !(files && files.length)) return
-  // 乐观占位：从发送这一刻就显示「回复中」，覆盖会话创建/附件上传/握手/模型首 token 的全部空窗
+  // 乐观占位：从发送这一刻就显示「思考中」，覆盖会话创建/附件上传/握手/模型首 token 的全部空窗
   state.waiting = true
   state.running = true
   setConvRunning(state.current, true)
