@@ -348,22 +348,30 @@ class RuntimeStore:
     def resolve_full(self, name: str, owner: str = "") -> dict:
         """模型名 → 调用所需的全部信息（对齐模型库「按 model_code 取服务商信息」用法）。
 
+        查找顺序与 resolve 一致：
+          1) 系统默认组（provider='' 且 scope='system'）→ resolved=False，走 .env 凭据；
+          2) 系统提供商下的模型；
+          3) 该用户自己的默认组模型（provider='' 且 scope='user'）；
+          4) 该用户自己的提供商下的模型。
         返回 {base_url, api_key, provider, provider_model, model_type, context_length,
-              scope, resolved}；系统默认组 resolved=False（base_url/api_key 为 None，走 .env）。
+              scope, resolved}。
         """
         out = {"base_url": None, "api_key": None, "provider": "", "provider_model": "",
                "model_type": 1, "context_length": None, "scope": "system", "resolved": False}
-        # 默认组（provider='' 且 system）
-        row = self._conn().execute(
-            "SELECT provider, model_type, context_length, scope FROM models "
+
+        # 1) 系统默认组（走 .env）
+        r = self._conn().execute(
+            "SELECT provider, model_type, context_length FROM models "
             "WHERE name=? AND provider='' AND scope='system' LIMIT 1",
             (name,),
         ).fetchone()
-        if row:
-            out.update({"provider": "", "model_type": row["model_type"] or 1,
-                        "context_length": row["context_length"], "scope": "system"})
+        if r:
+            out.update({"provider": "", "resolved": False, "scope": "system",
+                        "model_type": r["model_type"] or 1, "context_length": r["context_length"]})
             return out
+        # 2) 系统提供商 → 3) 用户默认组 → 4) 用户提供商
         for scope, owner_key in (("system", ""), ("user", owner)):
+            # 提供商下的模型（join providers 取 base_url/api_key）
             r = self._conn().execute(
                 "SELECT p.base_url, p.api_key, m.provider, m.provider_model, m.model_type, m.context_length "
                 "FROM providers p JOIN models m "
@@ -379,6 +387,18 @@ class RuntimeStore:
                     "scope": scope, "resolved": True,
                 })
                 return out
+            # 用户默认组（provider='' 且 scope='user'）→ 走 .env，但保留元数据
+            if scope == "user" and owner_key:
+                r2 = self._conn().execute(
+                    "SELECT model_type, context_length FROM models "
+                    "WHERE name=? AND provider='' AND scope='user' AND owner=? LIMIT 1",
+                    (name, owner_key),
+                ).fetchone()
+                if r2:
+                    out.update({"provider": "", "resolved": False, "scope": "user",
+                                "model_type": r2["model_type"] or 1,
+                                "context_length": r2["context_length"]})
+                    return out
         return out
 
     # ---------- 调用日志 ----------
