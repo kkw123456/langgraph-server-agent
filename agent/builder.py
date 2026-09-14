@@ -27,21 +27,28 @@ class AgentManager:
     @staticmethod
     def _default_cfg() -> dict:
         """默认组：直接取 .env 导入值（服务启动时的快照）。"""
-        return {"model": MODEL, "base_url": OPENAI_BASE_URL, "api_key": OPENAI_API_KEY}
+        return {"model": MODEL, "provider_model": MODEL, "provider": "",
+                "base_url": OPENAI_BASE_URL, "api_key": OPENAI_API_KEY}
 
     def get_cfg(self, user: str = "") -> dict:
         """取某用户当前生效的模型配置。"""
         return self._prefs.get(user or "") or self._default_cfg()
 
-    def set_model(self, user: str, name: str, base_url: str | None = None, api_key: str | None = None) -> dict:
+    def set_model(self, user: str, name: str, base_url: str | None = None, api_key: str | None = None,
+                  provider_model: str | None = None, provider: str = "") -> dict:
         """按用户记忆模型选择。
 
         base_url/api_key 传 None 表示该模型属于默认组（走 .env），
         **显式回退**为 .env 值，避免沿用上一次提供商的地址（历史 bug：
         从私有提供商模型切回默认模型时 base_url 未重置，导致 Connection error）。
+
+        provider_model：服务商侧真实模型名（模型库 provider_model 列）。
+        为空时回退用 name（多数 OpenAI 兼容服务商两侧同名）。
         """
         cfg = {
             "model": name,
+            "provider_model": (provider_model or name),
+            "provider": provider or "",
             "base_url": base_url if base_url is not None else OPENAI_BASE_URL,
             "api_key": api_key if api_key is not None else OPENAI_API_KEY,
         }
@@ -67,7 +74,8 @@ class AgentManager:
                 "为所选提供商填写密钥（支持任意 OpenAI 兼容接口）。"
             )
         return ChatOpenAI(
-            model=cfg["model"],
+            # 发给服务商的是 provider_model（服务商侧真实模型名），缺省回退平台内部名
+            model=cfg.get("provider_model") or cfg["model"],
             api_key=cfg["api_key"],
             base_url=cfg["base_url"],
             temperature=TEMPERATURE,
@@ -102,6 +110,7 @@ class AgentManager:
             frozenset(self.registry.enabled_ids()),
             user or "",
             cfg["model"],
+            cfg.get("provider_model", ""),
             cfg["base_url"],
             cfg["api_key"],
         )

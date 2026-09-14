@@ -661,13 +661,19 @@ async def api_set_model(request: Request, body: dict):
     if not name:
         return {"ok": False, "error": "模型名不能为空"}
     user = _current_user(request)
-    base_url, api_key = runtime.resolve(name, user)
+    info = runtime.resolve_full(name, user)
+    base_url, api_key = info["base_url"], info["api_key"]
     if base_url is None and api_key is None and not runtime.model_exists(name, user):
         return {"ok": False, "error": f"模型 {name} 不在可用列表中，请先添加"}
     if agent_manager is None:
         return {"ok": False, "error": "Agent 尚未初始化"}
     # 模型偏好按用户隔离（#67/#68）：只影响当前用户，不再全局共享
-    cfg = agent_manager.set_model(user, name, base_url=base_url, api_key=api_key)
+    # provider_model：服务商侧真实模型名，缺失时回退平台内部名
+    cfg = agent_manager.set_model(
+        user, name, base_url=base_url, api_key=api_key,
+        provider_model=info.get("provider_model") or name,
+        provider=info.get("provider") or "",
+    )
     return {"ok": True, "model": name, "base_url": cfg["base_url"]}
 
 
@@ -708,16 +714,40 @@ async def api_add_model(request: Request, body: dict):
         return {"ok": False, "error": "系统模型仅管理员可管理"}
     owner = "" if scope == "system" else _current_user(request)
     provider = (body.get("provider") or "").strip()
+    # 模型扩展元数据（对齐模型库）：类型/上线状态/上下文窗口/描述/服务商侧模型名
+    try:
+        model_type = int(body.get("model_type") or 1)
+    except (TypeError, ValueError):
+        model_type = 1
+    if model_type not in (1, 2, 3):
+        model_type = 1
+    try:
+        status = int(body.get("status", 1))
+    except (TypeError, ValueError):
+        status = 1
+    if status not in (0, 1):
+        status = 1
+    ctx_len = body.get("context_length")
+    try:
+        ctx_len = int(ctx_len) if ctx_len not in (None, "") else None
+        if ctx_len is not None and ctx_len <= 0:
+            ctx_len = None
+    except (TypeError, ValueError):
+        ctx_len = None
+    description = (body.get("description") or "").strip()[:500]
+    provider_model = (body.get("provider_model") or "").strip()[:128]
+    meta = dict(model_type=model_type, status=status, context_length=ctx_len,
+                description=description, provider_model=provider_model)
     if provider:
         p = runtime.get_provider(provider, scope, owner)
         if p is None:
             return {"ok": False, "error": f"提供商 {provider} 不存在或无权限"}
-        if not runtime.add_model(name, provider, scope, owner):
+        if not runtime.add_model(name, provider, scope, owner, **meta):
             return {"ok": False, "error": "该提供商下已有同名模型"}
     else:
         if runtime.model_exists(name, owner):
             return {"ok": False, "error": "模型已存在"}
-        if not runtime.add_model(name, "", scope, owner):
+        if not runtime.add_model(name, "", scope, owner, **meta):
             return {"ok": False, "error": "模型已存在"}
     return {
         "ok": True,
@@ -768,7 +798,15 @@ async def api_add_provider(request: Request, body: dict):
     if scope == "system" and role != "admin":
         return {"ok": False, "error": "系统提供商仅管理员可管理"}
     owner = "" if scope == "system" else _current_user(request)
-    if not runtime.add_provider(name, base_url, api_key, scope, owner):
+    # 服务商编码（deepseek/zhipu/qwen...，可空）与启用状态
+    code = (body.get("code") or "").strip()[:64]
+    try:
+        pstatus = int(body.get("status", 1))
+    except (TypeError, ValueError):
+        pstatus = 1
+    if pstatus not in (0, 1):
+        pstatus = 1
+    if not runtime.add_provider(name, base_url, api_key, scope, owner, code=code, status=pstatus):
         return {"ok": False, "error": f"提供商 {name} 已存在"}
     return {
         "ok": True,
@@ -810,6 +848,21 @@ def api_del_provider_model(request: Request, name: str, model: str, scope: str =
         "providers": [_provider_public(x) for x in runtime.list_providers(owner)],
         "model": agent_manager.get_cfg(_current_user(request))["model"] if agent_manager else None,
     }
+
+
+@app.get("/api/runtime/model-calls", dependencies=[Depends(require_auth)])
+def api_model_call_stats(request: Request, model: str = "", days: int = 7):
+    """模型调用统计（对齐模型库 ai_model_call_log）：近 N 天按模型聚合的
+    调用量 / 成功率 / 平均耗时 / 总 token / 总费用。普通用户仅见自己模型的统计。"""
+    role = _current_role(request)
+    days = max(1, min(int(days or 7), 365))
+    rows = runtime.call_stats(model=model, days=days)
+    # 非管理员：过滤掉自己不可见的模型
+    if role != "admin":
+        user = _current_user(request)
+        visible = set(runtime.list_models(user))
+        rows = [r for r in rows if r["model"] in visible]
+    return {"ok": True, "days": days, "stats": rows}
 
 
 # ===================== 会话管理（会话归属当前用户） =====================
@@ -1151,6 +1204,11 @@ async def run_turn(cid: str, content: str, run: RunHandle | None, attachments: l
         # run_id -> tool_call 映射：并行工具调用时把 on_tool_end 的输出精确归属到
         # 对应的调用上（end 事件到达顺序可能与 start 不同，不能简单取「最后一个」）
         tool_by_run: dict = {}
+        # 模型调用统计（对齐模型库 ai_model_call_log）：累计 token，记首次模型调用耗时
+        _call_start = time.monotonic()
+        _usage_prompt = 0
+        _usage_completion = 0
+        _call_failed = False
         # 首轮输入为用户消息；后续轮次为中断后的 resume 续跑。Agent 已开启
         # interrupt_before=["tools"]，因此每一次工具调用前都会在此循环中被拦截。
         first = True
@@ -1174,6 +1232,24 @@ async def run_turn(cid: str, content: str, run: RunHandle | None, attachments: l
                             assistant["content"] += text
                             if run:
                                 await run.emit({"type": "token", "content": text})
+                    elif kind == "on_chat_model_end":
+                        # 累计 token 用量（兼容 usage_metadata / token_usage 两种字段）
+                        out_obj = (event.get("data") or {}).get("output")
+                        _um = None
+                        try:
+                            _um = getattr(out_obj, "usage_metadata", None)
+                            if not _um and hasattr(out_obj, "response_metadata"):
+                                _um = (out_obj.response_metadata or {}).get("token_usage")
+                            if not _um and hasattr(out_obj, "generations"):
+                                g0 = out_obj.generations[0][0]
+                                _um = getattr(g0, "usage_metadata", None) or \
+                                      getattr(getattr(g0, "message", None), "usage_metadata", None)
+                        except Exception:
+                            _um = None
+                        if isinstance(_um, dict):
+                            _usage_prompt += int(_um.get("input_tokens") or _um.get("prompt_tokens") or 0)
+                            _usage_completion += int(
+                                _um.get("output_tokens") or _um.get("completion_tokens") or 0)
                     elif kind == "on_tool_start":
                         tc = {
                             "name": event.get("name", ""),
@@ -1211,6 +1287,7 @@ async def run_turn(cid: str, content: str, run: RunHandle | None, attachments: l
                 break
             except Exception as e:
                 err = f"执行出错: {e}"
+                _call_failed = True
                 assistant["content"] += f"\n[{err}]"
                 if run:
                     await run.emit({"type": "error", "content": err})
@@ -1279,6 +1356,21 @@ async def run_turn(cid: str, content: str, run: RunHandle | None, attachments: l
             store.touch(cid)
         if run:
             await run.emit({"type": "message_end", "stopped": cancelled})
+        # 模型调用日志（对齐模型库 ai_model_call_log）：无论成败都记，
+        # 失败=执行期异常或正文里出现执行错误标记；手动停止不计为失败。
+        if agent_manager is not None:
+            _cfg = agent_manager.get_cfg(user)
+            _ok = not _call_failed
+            runtime.log_call(
+                model=_cfg.get("model", ""),
+                provider=_cfg.get("provider", ""),
+                user_id=user,
+                prompt_tokens=_usage_prompt,
+                completion_tokens=_usage_completion,
+                cost=0.0,  # 费用需模型定价，暂记 0（后续可接单价表计算）
+                success=_ok,
+                cost_time=int((time.monotonic() - _call_start) * 1000),
+            )
         return {"assistant": assistant}
     finally:
         workspace.current_workspace.reset(token)
