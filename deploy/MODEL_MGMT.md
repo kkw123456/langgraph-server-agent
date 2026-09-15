@@ -38,25 +38,37 @@ code 支持别名归一：`volcengine` / `ark` / `doubao` / `huoshan` → `volc`
 
 ## 设计取舍
 
-**清单不联网、不外发 api_key。** 相比调用服务商 `/v1/models`：
+**内置清单 + 联网拉取双通道。** 内置清单覆盖常见公有云，联网调
+`GET {base_url}/models` 覆盖自建/中转端点（one-api、new-api、LiteLLM、vLLM）。
 
 | | 内置清单 | 调 /v1/models |
 | --- | --- | --- |
-| 私有/自建端点 | 不适用（需手输） | 支持 |
-| 密钥外发风险 | 无 | 需发往 base_url |
-| 响应速度 | 毫秒级 | 依赖网络 |
+| 私有/自建端点 | 不适用（未收录） | 支持 |
+| 密钥外发风险 | 无 | 需发往 base_url（供应商已存的那一份） |
+| 响应速度 | 毫秒级 | 依赖网络（超时 8s） |
 | 数据新鲜度 | 可能过时 | 实时 |
 
+弹窗默认走**联网拉取**：内置清单必然滞后，自建端点更是压根不在收录范围，
+不联网就是「一个模型都拉不到」。联网失败会**回退内置清单**并给出可读原因
+（连接失败 / 401 密钥错误 / 非 JSON / 空列表），不会只给一个空白弹窗。
+弹窗右上角可在「联网拉取 / 用内置清单」间手动切换。
+
+联网命中内置清单的模型沿用其类型与上下文长度；未命中则按名字猜类型
+（`embed`/`bge-`/`text-embedding`/`gte-` → 向量；含 `vl`/`vision`/`omni`/`visual`
+→ 多模态；其余 → 语言模型）。
+
 清单是**参考**，不是唯一入口：名称可能随后续版本变化，以手动输入为准。
-若后续需要精确列表，可加「从接口拉取」作为补充通道（用提供商已存的
-base_url + api_key 调 `GET {base_url}/models`）。
 
 ## 接口
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET | `/api/runtime/catalog?code=&provider=&scope=` | 取可选模型清单，剔除用户已可见的全部模型 |
+| GET | `/api/runtime/catalog?code=&provider=&scope=&online=&base_url=&api_key=` | 取可选模型清单；`online=1` 时联网拉取，失败回退内置清单 |
 | GET | `/api/runtime/catalog/providers` | 已收录供应商（供添加提供商时选 code） |
+
+清单**不再剔除**用户已可见的模型，而是逐项带 `added: true/false`：前端把
+已添加项置灰并标「已添加」，让用户看到「确实拉到了，只是都加过了」，而不是
+误以为功能坏了（这正是「拉不到模型」的第一层错觉来源）。
 
 `/api/runtime` 的 `providers[]` 中，每个提供商会带 `code` / `status` /
 `model_meta[]`（含 `model_type`/`status`/`provider_model`/`context_length`/`description`），
@@ -64,12 +76,17 @@ base_url + api_key 调 `GET {base_url}/models`）。
 
 ## 关键实现点（曾踩过的坑）
 
-1. **剔除口径必须是全局的**。最初按单个 provider 剔除，导致默认组里已有的
-   `deepseek-chat` 在新建 DeepSeek 提供商下仍会出现、可被重复添加。现改为
-   `runtime.list_models(user)`（系统默认组 + 系统提供商 + 用户私有）统一去重。
+1. **联网拉取必须把 `base_url` 传到后端**。后端只会用请求里给的
+   `base_url`/`api_key`（缺省时再回落到该 provider 已存的值）。前端只传
+   `code`/`provider` 而漏了 `base_url`，后端就无从发起 `/models` 请求，
+   只能退化成「未收录该供应商」→ 空清单。**默认提供商分组也要有 `baseUrl`**
+   （取自 `wb.runtime.base_url`），过去它只填了展示用的 `sub`。
 2. **`_provider_public` 是脱敏视图，容易漏字段**。`code`/`status`/`model_meta`
    都靠它传给前端；漏了 `code` 会导致「拉取模型」匹配不到清单，漏了
    `model_meta` 会让表格所有元数据都显示默认值。
 3. **新增顶层模块要加进 `deploy/deploy.py`**。`model_catalog.py` 是 server
    直接 import 的顶层模块，`INCLUDE` 与 `REQUIRED_MODULES` 都要加，
    否则线上启动即 `ModuleNotFoundError`（错误只在 systemd 日志里体现）。
+4. **设置页布局用网格铺开**。`.set-body` 曾硬限宽 760px，宽屏下内容挤成
+   窄柱。现改为 `.set-grid`（`auto-fit, minmax(420px, 1fr)`）：宽屏 2~3 列，
+   含供应商卡片的「模型管理」用 `.set-span-all` 独占整行。
