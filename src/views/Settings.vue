@@ -82,6 +82,8 @@ const systemGroups = computed<ProviderGroup[]>(() => [
     sub: wb.runtime.base_url || '（使用 .env 配置的接口地址）',
     models: scopedModels.value.system, builtin: true,
     scope: 'system', canManage: isAdmin.value,
+    // 默认组也能联网拉取：地址与密钥都来自 .env，由后端兜底读取
+    baseUrl: wb.runtime.base_url || '',
   },
 ])
 
@@ -107,6 +109,7 @@ const userGroups = computed<ProviderGroup[]>(() => [
     sub: '私有模型（走 .env 凭据）',
     models: scopedModels.value.user, builtin: true,
     scope: 'user', canManage: true,
+    baseUrl: wb.runtime.base_url || '',
   },
 ])
 
@@ -258,7 +261,9 @@ async function openCatalog(g: ProviderGroup): Promise<void> {
   try {
     // 对已有 base_url 的供应商默认联网拉取：内置清单必然滞后，且自建/中转
     // 端点根本不在收录范围，不联网就是「一个模型都拉不到」。
-    const cat = await fetchCatalog(g.code || '', g.name, g.scope, true)
+    // 必须带上该供应商已保存的 base_url/api_key，否则后端无从发起 /models 请求，
+    // 会退化成「未收录供应商」→ 空清单。
+    const cat = await fetchCatalog(g.code || '', g.name, g.scope, true, g.baseUrl || '', '')
     if (!cat) {
       catalogInfo.value = { known: false, label: '', code: '', note: '拉取失败，请重试或手动添加' }
       return
@@ -283,7 +288,7 @@ async function reloadCatalog(online: boolean): Promise<void> {
   if (!g) return
   catalogLoading.value = true
   try {
-    const cat = await fetchCatalog(g.code || '', g.name, g.scope, online)
+    const cat = await fetchCatalog(g.code || '', g.name, g.scope, online, g.baseUrl || '', '')
     if (!cat) {
       catalogInfo.value = { ...catalogInfo.value, note: '拉取失败，请重试' }
       return
