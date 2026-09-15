@@ -322,16 +322,23 @@ export async function removeProvider(name: string, scope: 'system' | 'user' = 'u
   return true
 }
 
-/** 拉取某提供商的可选模型清单（内置清单，不联网）。
- *  provider 非空时由服务端读取其 code；只返回**未添加**的模型。 */
+/** 拉取某提供商的可选模型清单。
+ *  provider 非空时由服务端读取其 code 与 base_url。
+ *  online=true 时联网请求该供应商的 /models（自建/中转端点只有这样才能拉到）；
+ *  失败会回退内置清单并在 note 里说明原因。返回列表含已添加项（added 标记）。
+ *  baseUrl/apiKey：供应商尚未保存时（添加弹框第 2 步）直接带入草稿值。 */
 export async function fetchCatalog(
-  code = '', provider = '', scope: 'system' | 'user' = 'user',
+  code = '', provider = '', scope: 'system' | 'user' = 'user', online = false,
+  baseUrl = '', apiKey = '',
 ): Promise<ModelCatalog | null> {
   try {
     const qs = new URLSearchParams()
     if (code) qs.set('code', code)
     if (provider) qs.set('provider', provider)
     qs.set('scope', scope)
+    if (online) qs.set('online', '1')
+    if (baseUrl) qs.set('base_url', baseUrl)
+    if (apiKey) qs.set('api_key', apiKey)
     const r = await api.get<ModelCatalog>(`/api/runtime/catalog?${qs.toString()}`)
     if (!r.ok) {
       toast.error(r.error || '拉取模型清单失败')

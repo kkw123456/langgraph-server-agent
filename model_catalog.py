@@ -1,18 +1,23 @@
-"""内置供应商模型清单。
+"""供应商模型清单（内置参考 + 可联网实际拉取）。
 
 用途：「设置 → 模型管理」拉取某提供商的可选模型列表，供勾选批量加入。
 
 设计取舍：
-- **不联网**：不调用服务商接口。原因有三——(1) 部分自建/私有端点无 /v1/models；
-  (2) 避免把 api_key 发往意外地址；(3) 秒级响应、离线可用。
-- **按 code 匹配**：提供商创建时填的 code（deepseek/zhipu/qwen/volc/...）用于命中清单。
-  code 为空或未收录时，前端展示为「未能识别供应商，请手动添加模型名」。
-- **清单会过时**：这是内部参考列表，不是权威来源。允许用户直接手输模型名，
-  勾选只是加速手段，不构成唯一入口。
-
-数据来源：各厂商公开文档的模型命名（2024-2025）。名称可能随后续版本变化，
-以手动输入为准。
+- **内置清单为底**：不联网也能给出候选，覆盖各厂商公开文档的常见模型名
+  （2024-2025）。名称可能随后续版本变化，允许用户直接手输模型名。
+- **支持联网实际拉取**：内置清单必然滞后，且自建/中转端点（one-api、new-api、
+  LiteLLM、vLLM 等）根本不在收录范围。为此提供 ``fetch_remote``：带 api_key
+  请求该供应商的 ``{base_url}/models``，拿到真实可用列表。
+  仅在用户显式触发时联网，且 api_key 只发往该供应商自己的 base_url。
+- **按 code 匹配**：供应商创建时填的 code（deepseek/zhipu/qwen/volc/...）用于命中
+  内置清单；code 为空或未收录时，回退为「按 base_url 联网拉取」。
 """
+
+from __future__ import annotations
+
+import json
+import urllib.error
+import urllib.request
 
 # 供应商编码 → 展示名 / 接口地址 / 模型清单
 # 模型项：(模型名, 模型类型, 上下文窗口, 说明)
@@ -157,11 +162,16 @@ def list_providers() -> list[dict]:
     ]
 
 
-def catalog_for(code: str, existing: list[str] | None = None) -> dict:
+def catalog_for(code: str, existing: list[str] | None = None,
+                include_existing: bool = False) -> dict:
     """取某供应商的可选模型清单。
 
-    existing：已添加的模型名，默认从结果中剔除（只展示未添加的）。
-    返回 {known, code, label, base_url, models:[{name,model_type,context_length,description}]}
+    existing：已添加的模型名。默认从结果中剔除（只展示未添加的）。
+    include_existing：为 True 时不过滤，连同已添加的一起返回并标注
+        每项的 added 标记。用于「勾选导入」弹窗——只列未添加项会让用户
+        误以为「拉不到模型」，明确标出已添加项更符合预期。
+
+    返回 {known, code, label, base_url, models:[{name,model_type,context_length,description,added}]}
     """
     key = _normalize(code)
     info = PROVIDER_CATALOG.get(key)
@@ -169,11 +179,109 @@ def catalog_for(code: str, existing: list[str] | None = None) -> dict:
         return {"known": False, "code": code or "", "label": "", "base_url": "",
                 "models": [], "note": "未收录该供应商，请手动输入模型名"}
     seen = set(existing or [])
-    models = [
-        {"name": name, "model_type": mtype,
-         "context_length": ctx, "description": desc}
-        for name, mtype, ctx, desc in info["models"]
-        if name not in seen
-    ]
+    models = []
+    for name, mtype, ctx, desc in info["models"]:
+        if name in seen and not include_existing:
+            continue
+        models.append({"name": name, "model_type": mtype,
+                       "context_length": ctx, "description": desc,
+                       "added": name in seen})
     return {"known": True, "code": key, "label": info["label"],
             "base_url": info["base_url"], "models": models}
+
+
+# ===================== 联网实际拉取（可选，用户显式触发） =====================
+# 拉取失败一律回退到内置清单，不阻塞流程。超时压到 8s，避免设置页长时间转圈。
+_FETCH_TIMEOUT = 8.0
+
+
+def _guess_type(name: str) -> int:
+    """按模型名猜类型：1=LLM 2=Embedding 3=多模态（推测，用户可在列表里改）。"""
+    n = (name or "").lower()
+    if any(k in n for k in ("embed", "bge-", "bge_", "text-embedding", "gte-")):
+        return 2
+    if any(k in n for k in ("vl", "vision", "omni", "-v-", "visual", "multimodal")):
+        return 3
+    return 1
+
+
+def fetch_remote(base_url: str, api_key: str = "", known: dict[str, dict] | None = None,
+                 existing: list[str] | None = None) -> dict:
+    """按 OpenAI 兼容协议请求 {base_url}/models，返回真实可用的模型清单。
+
+    这是「内置清单拉不到模型」的正解：自建/中转端点（one-api、new-api、
+    LiteLLM、vLLM、Xinference 等）不在收录范围里，但都实现了 /models。
+
+    known：内置清单里 model 名 → 元数据的映射，命中时沿用其类型/上下文/说明，
+    比按名字猜更准；未命中才回退 _guess_type。
+
+    返回 {"ok": bool, "models": [...], "error": str}
+    models 项结构同 catalog_for（无 known/added，由调用方补）。
+    """
+    url = (base_url or "").strip().rstrip("/")
+    if not url:
+        return {"ok": False, "models": [], "error": "缺少接口地址"}
+    if not url.lower().startswith(("http://", "https://")):
+        return {"ok": False, "models": [], "error": "接口地址需以 http:// 或 https:// 开头"}
+    # 用户填的地址可能已经带了 /models，避免拼成 /models/models
+    if not url.endswith("/models"):
+        url = f"{url}/models"
+
+    req = urllib.request.Request(url, method="GET")
+    req.add_header("Accept", "application/json")
+    if api_key:
+        req.add_header("Authorization", f"Bearer {api_key}")
+    try:
+        with urllib.request.urlopen(req, timeout=_FETCH_TIMEOUT) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as e:
+        # 401/403 是最高频的失败原因（密钥没填或不对），单独给出可读提示
+        if e.code in (401, 403):
+            return {"ok": False, "models": [],
+                    "error": f"供应商拒绝访问（HTTP {e.code}），请检查 API Key"}
+        return {"ok": False, "models": [], "error": f"供应商返回 HTTP {e.code}"}
+    except urllib.error.URLError as e:
+        return {"ok": False, "models": [], "error": f"无法连接供应商：{e.reason}"}
+    except Exception as e:  # 超时等
+        return {"ok": False, "models": [], "error": f"拉取失败：{e}"}
+
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return {"ok": False, "models": [], "error": "供应商返回的不是 JSON（可能不是 OpenAI 兼容接口）"}
+
+    # 兼容三种常见形状：{data:[...]} / {models:[...]} / [...]
+    rows = data.get("data") if isinstance(data, dict) else data
+    if rows is None and isinstance(data, dict):
+        rows = data.get("models")
+    if not isinstance(rows, list):
+        return {"ok": False, "models": [], "error": "响应里没有模型列表字段"}
+
+    seen = set(existing or [])
+    meta = known or {}
+    out: list[dict] = []
+    for it in rows:
+        name = it.get("id") if isinstance(it, dict) else it
+        if not isinstance(name, str) or not name.strip():
+            continue
+        name = name.strip()
+        k = meta.get(name)
+        out.append({
+            "name": name,
+            "model_type": k["model_type"] if k else _guess_type(name),
+            "context_length": k["context_length"] if k else None,
+            "description": k["description"] if k else "",
+            "added": name in seen,
+        })
+    if not out:
+        return {"ok": False, "models": [], "error": "供应商返回了空列表"}
+    return {"ok": True, "models": out, "error": ""}
+
+
+def known_map(code: str) -> dict[str, dict]:
+    """内置清单中该供应商的 模型名 → 元数据 映射（供 fetch_remote 补全信息）。"""
+    info = PROVIDER_CATALOG.get(_normalize(code))
+    if not info:
+        return {}
+    return {name: {"model_type": t, "context_length": c, "description": d}
+            for name, t, c, d in info["models"]}

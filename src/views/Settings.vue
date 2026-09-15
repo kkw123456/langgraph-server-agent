@@ -214,15 +214,28 @@ const catalogLoading = ref(false)
 const catalogTarget = ref<ProviderGroup | null>(null)
 const catalogModels = ref<CatalogModel[]>([])
 const catalogChecked = ref<string[]>([])
-const catalogInfo = ref<{ known: boolean; label: string; note?: string; code: string }>(
+const catalogInfo = ref<{ known: boolean; label: string; note?: string; code: string; online?: boolean }>(
   { known: false, label: '', code: '' },
 )
 const catalogAdding = ref(false)
 
-// 已有模型名集合（用于清单去重展示，双保险：服务端已剔除，前端再挡一次）
+// 清单表格：已添加项打标并禁止勾选（列上有勾选禁用，避免重复导入）
 const catalogColumns = [
-  { type: 'selection' as const },
-  { title: '模型名', key: 'name', ellipsis: { tooltip: true } },
+  {
+    type: 'selection' as const,
+    disabled: (row: CatalogModel) => !!row.added,
+  },
+  {
+    title: '模型名', key: 'name', ellipsis: { tooltip: true },
+    render: (row: CatalogModel) => {
+      const parts: VNodeChild[] = [h('span', null, row.name)]
+      if (row.added) {
+        parts.push(h(NTag, { size: 'tiny', bordered: false, type: 'default', style: 'margin-left:6px' },
+          { default: () => '已添加' }))
+      }
+      return h('span', { class: 'set-mt-namewrap' }, parts)
+    },
+  },
   {
     title: '类型', key: 'model_type', width: 96,
     render: (row: CatalogModel) =>
@@ -243,16 +256,43 @@ async function openCatalog(g: ProviderGroup): Promise<void> {
   catalogChecked.value = []
   catalogModels.value = []
   try {
-    const cat = await fetchCatalog(g.code || '', g.name, g.scope)
+    // 对已有 base_url 的供应商默认联网拉取：内置清单必然滞后，且自建/中转
+    // 端点根本不在收录范围，不联网就是「一个模型都拉不到」。
+    const cat = await fetchCatalog(g.code || '', g.name, g.scope, true)
     if (!cat) {
       catalogInfo.value = { known: false, label: '', code: '', note: '拉取失败，请重试或手动添加' }
       return
     }
-    // 已添加的不再展示（后端已剔除，此处兜底过滤）
-    const owned = new Set(g.models)
-    catalogModels.value = (cat.models || []).filter((m) => !owned.has(m.name))
+    catalogModels.value = cat.models || []
+    // 已添加项置灰但仍展示，让用户看到「确实拉到了，只是都加过了」
+    catalogChecked.value = []
     catalogInfo.value = {
       known: cat.known, label: cat.label || '', code: cat.code || '',
+      online: !!cat.online,
+      note: cat.note
+        || (cat.known && !catalogModels.value.length ? '该供应商的模型都已添加' : ''),
+    }
+  } finally {
+    catalogLoading.value = false
+  }
+}
+
+/** 在「拉取模型」弹窗里重新拉取（内置/联网可切换，联网失败时可换用手动）。 */
+async function reloadCatalog(online: boolean): Promise<void> {
+  const g = catalogTarget.value
+  if (!g) return
+  catalogLoading.value = true
+  try {
+    const cat = await fetchCatalog(g.code || '', g.name, g.scope, online)
+    if (!cat) {
+      catalogInfo.value = { ...catalogInfo.value, note: '拉取失败，请重试' }
+      return
+    }
+    catalogModels.value = cat.models || []
+    catalogChecked.value = catalogChecked.value.filter((n) => !(cat.models || []).find((m) => m.name === n)?.added)
+    catalogInfo.value = {
+      known: cat.known, label: cat.label || '', code: cat.code || '',
+      online: !!cat.online,
       note: cat.note || (cat.known && !catalogModels.value.length ? '该供应商的模型都已添加' : ''),
     }
   } finally {
@@ -268,7 +308,7 @@ async function submitCatalog(): Promise<void> {
   }
   const picked = new Set(catalogChecked.value)
   const items = catalogModels.value
-    .filter((m) => picked.has(m.name))
+    .filter((m) => picked.has(m.name) && !m.added)   // 已添加项禁勾，双保险
     .map((m) => ({
       name: m.name, model_type: m.model_type,
       context_length: m.context_length ?? null, description: m.description || '',
@@ -387,14 +427,17 @@ function pickCatalogProvider(i: number, code: string | null): void {
   if (!d.name.trim()) d.name = p.label
   if (!d.baseUrl.trim()) d.baseUrl = p.base_url
 }
-/** 第 2 步：拉取该草稿对应供应商的可选模型（内置清单，已剔除已添加项）。 */
+/** 第 2 步：拉取该草稿对应供应商的可选模型。
+ *  供应商尚未入库，因此这里不能按 provider 查权限，直接用草稿里的
+ *  base_url/api_key 联网拉 /models；失败再回退内置清单（按 code 命中）。 */
 async function loadDraftCatalog(i: number): Promise<void> {
   const d = providerDrafts.value[i]
   if (!d) return
   const slot: FetchSlot = { code: d.code, models: [], checked: [], loading: true, note: '', known: false }
   fetchSlots[i] = slot
-  // scope=user 时后端按当前用户可见模型去重；系统级供应商沿用 system 口径
-  const cat = await fetchCatalog(d.code, '', 'user')
+  // 后端在 provider 为空时只走内置清单；这里手动带上 code 让其命中内置项，
+  // 联网能力由 online=1 + 已保存的 base_url 提供（未保存的走 draft 参数）。
+  const cat = await fetchCatalog(d.code, '', providerScope.value, true, d.baseUrl, d.apiKey)
   slot.loading = false
   if (!cat) {
     slot.note = '拉取失败，可在第 1 步手动输入模型名，或稍后重试'
@@ -403,9 +446,9 @@ async function loadDraftCatalog(i: number): Promise<void> {
   slot.models = cat.models || []
   slot.known = !!cat.known
   slot.note = cat.note
-    || (!d.code ? '未选择内置供应商，无法拉取清单，请手动添加模型'
+    || (!d.code && !d.baseUrl ? '未选择内置供应商，无法拉取清单，请手动添加模型'
       : cat.known && !slot.models.length ? '该供应商的模型都已添加' : '')
-  // 默认只勾未添加的（后端已剔除，这里保持「全不勾」，让用户明确选择）
+  // 默认全不勾，让用户明确选择；已添加项在表格里禁用
   slot.checked = []
 }
 function toggleSlotAll(i: number): void {
@@ -583,7 +626,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="page">
+  <div class="page set-page">
     <div class="page-head">
       <div class="page-title">
         <Settings :size="20" />
@@ -598,8 +641,8 @@ onMounted(() => {
     </div>
 
     <div class="page-body">
-      <div class="set-body">
-        <NCard size="small" title="模型管理">
+      <div class="set-grid">
+        <NCard size="small" title="模型管理" class="set-span-all">
           <div class="set-body set-body-flat">
             <div class="set-row">
               <span class="set-label">当前模型</span>
@@ -660,7 +703,6 @@ onMounted(() => {
             />
           </div>
         </NCard>
-
         <!-- 添加模型供应商：两步式弹框（第 1 步基本信息，第 2 步勾选模型） -->
         <NModal
           v-model:show="providerModal"
@@ -805,14 +847,32 @@ onMounted(() => {
             <span class="muted tiny">
               供应商 <b>{{ catalogInfo.label || '未识别' }}</b>
               <template v-if="catalogInfo.code">（code: {{ catalogInfo.code }}）</template>
+              <NTag
+                v-if="catalogInfo.online" size="tiny" :bordered="false" type="success"
+                style="margin-left:6px"
+              >联网拉取</NTag>
+              <NTag
+                v-else size="tiny" :bordered="false" type="default"
+                style="margin-left:6px"
+              >内置清单</NTag>
             </span>
             <span class="set-catalog-count muted tiny">
-              已选 {{ catalogChecked.length }} / 可选 {{ catalogModels.length }}
+              已选 {{ catalogChecked.length }} / 共 {{ catalogModels.length }}
             </span>
           </div>
           <NAlert v-if="catalogInfo.note" type="warning" :bordered="false" class="set-catalog-alert">
             {{ catalogInfo.note }}
           </NAlert>
+          <!-- 联网/内置两种口径可切换：联网失败或想核对线上真实模型时用得上 -->
+          <div class="set-catalog-tools">
+            <NButton size="tiny" secondary :loading="catalogLoading" @click="reloadCatalog(true)">
+              <template #icon><DownloadCloud :size="12" /></template>
+              联网拉取
+            </NButton>
+            <NButton size="tiny" quaternary :loading="catalogLoading" @click="reloadCatalog(false)">
+              用内置清单
+            </NButton>
+          </div>
           <NSpin :show="catalogLoading">
             <NDataTable
               v-if="catalogModels.length"
@@ -831,7 +891,7 @@ onMounted(() => {
           <template #footer>
             <div class="set-catalog-foot">
               <span class="muted tiny">
-                勾选后点击「添加」批量导入；清单为内置参考，名称可能过时，也可直接手输。
+                勾选后点击「添加」批量导入；标「已添加」的不可重复导入，也可直接手输模型名。
               </span>
               <NSpace>
                 <NButton

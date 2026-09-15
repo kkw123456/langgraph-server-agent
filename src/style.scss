@@ -838,8 +838,20 @@ body {
 .lb-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 .lb-tags { display: flex; flex-wrap: wrap; gap: 6px; }
 
-/* 设置页 */
-.set-body { display: flex; flex-direction: column; gap: 14px; max-width: 760px; }
+/* 设置页
+   铺平：原先 .set-body 限宽 760px，在宽屏下内容挤成一条窄柱、右侧大片留白。
+   改为自适应多列网格——卡片按可用宽度自动排布，窄屏自然回落单列。
+   卡片本身去掉嵌套层级（NCard 的 title 作为区块标题），不再一层套一层缩进。 */
+.set-page .page-body { padding: 0 32px 40px; }
+.set-body { display: flex; flex-direction: column; gap: 14px; }
+/* 卡片网格：最小 420px，宽屏自动 2~3 列，避免长条单列 */
+.set-grid {
+  display: grid; gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+  align-items: start;
+}
+/* 需要整行铺满的区块（模型管理：内含供应商卡片列表） */
+.set-span-all { grid-column: 1 / -1; }
 .set-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .set-label {
   width: 130px; flex: 0 0 auto; font-size: 13px; color: var(--muted);
@@ -1289,6 +1301,11 @@ body {
 }
 .set-catalog-count { font-variant-numeric: tabular-nums; }
 .set-catalog-alert { margin-bottom: 10px; }
+/* 联网 / 内置两种口径切换：紧贴表格上方，右侧对齐 */
+.set-catalog-tools {
+  display: flex; align-items: center; gap: 6px;
+  margin-bottom: 8px; justify-content: flex-end;
+}
 .set-catalog-loading { padding: 28px 0; text-align: center; }
 .set-catalog-foot {
   display: flex; align-items: center; justify-content: space-between;

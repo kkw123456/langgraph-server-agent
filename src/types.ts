@@ -162,12 +162,13 @@ export interface RuntimeProvider {
   model_meta?: RuntimeModelMeta[]
 }
 
-/** 供应商清单中的单个可选项（内置清单，供勾选批量导入） */
+/** 供应商清单中的单个可选项（内置清单 / 联网拉取，供勾选批量导入） */
 export interface CatalogModel {
   name: string
   model_type: number        // 1LLM 2向量 3多模态
   context_length?: number
   description?: string
+  added?: boolean           // 已添加过：列表里置灰不可勾，避免「拉不到」的错觉
 }
 
 /** 拉取到的供应商模型清单 */
@@ -181,6 +182,9 @@ export interface ModelCatalog {
   existing?: string[]       // 该提供商下已添加的模型名
   note?: string
   error?: string
+  online?: boolean          // 本次是否来自联网拉取
+  online_error?: string     // 联网失败原因（回退内置清单时附上）
+  need_key?: boolean        // 失败疑似因密钥缺失/错误，前端据此突出提示
 }
 
 /** 已收录供应商（供添加提供商时选择） */

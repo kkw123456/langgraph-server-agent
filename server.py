@@ -935,34 +935,65 @@ def api_model_call_stats(request: Request, model: str = "", days: int = 7):
 
 
 @app.get("/api/runtime/catalog", dependencies=[Depends(require_auth)])
-def api_model_catalog(request: Request, code: str = "", provider: str = "", scope: str = "user"):
-    """拉取某提供商的可选模型清单（内置清单，不联网、不外发 api_key）。
+def api_model_catalog(request: Request, code: str = "", provider: str = "",
+                      scope: str = "user", online: int = 0,
+                      base_url: str = "", api_key: str = ""):
+    """拉取某提供商的可选模型清单。
 
     code：供应商编码（deepseek/zhipu/qwen...）；provider 非空时自动取其 code 与 base_url。
-    已添加的模型会从清单中剔除（按用户可见的全部模型名去重），只返回可新增项。
+    online=1：联网请求该供应商的 /models 拿真实可用列表（失败回退内置清单）。
+      自建/中转端点不在内置清单里，只有联网才能拉到，这是「拉不到模型」的正解。
+    base_url/api_key：供应商尚未保存时（添加弹框第 2 步）由前端直接带入草稿值。
+    默认**不剔除**已添加的模型，改为逐项标 added——只列未添加项会让用户误以为拉取失败。
     """
     user = _current_user(request)
     if scope not in ("system", "user"):
         scope = "user"
     owner = "" if scope == "system" else user
 
-    existing: list[str] = []
-    base_url = ""
     if provider:
         p = runtime.get_provider(provider, scope, owner)
         if p is None:
             return {"ok": False, "error": f"提供商 {provider} 不存在或无权限"}
         if not code:
             code = p.get("code") or ""
-        base_url = p.get("base_url") or ""
+        base_url = base_url or (p.get("base_url") or "")
+        api_key = api_key or (p.get("api_key") or "")
 
-    # 剔除口径：该用户**已可见的全部模型名**（系统默认组 + 系统提供商 + 用户私有）。
-    # 不按单个分组剔除，否则同一模型挂在不同分组下会重复出现在清单里。
+    # 该用户已可见的全部模型名（系统默认组 + 系统提供商 + 用户私有）。
+    # 不按单个分组计算，否则同一模型挂在不同分组下会重复出现。
     existing = runtime.list_models(user)
 
-    cat = model_catalog.catalog_for(code, existing)
+    cat = model_catalog.catalog_for(code, existing, include_existing=True)
     cat["base_url"] = cat.get("base_url") or base_url
     cat["existing"] = existing
+
+    # 联网拉取：仅当用户显式要求，或内置清单为空（code 未收录）时兜底尝试。
+    # 内置清单为空却没联网，用户看到的就是「一个模型都拉不到」，体验上等同功能坏了。
+    need_online = bool(online) or (not cat.get("models"))
+    if need_online and base_url:
+        got = model_catalog.fetch_remote(
+            base_url, api_key, model_catalog.known_map(code), existing,
+        )
+        if got.get("ok"):
+            cat["models"] = got["models"]
+            cat["online"] = True
+            cat["note"] = ""
+        else:
+            cat["online"] = False
+            cat["online_error"] = got.get("error") or ""
+            # 联网失败但内置清单有货：保留内置项，仅附上失败原因，不打断用户
+            if cat.get("models"):
+                cat["note"] = f"联网拉取失败（{cat['online_error']}），以下为内置参考清单"
+            else:
+                cat["note"] = f"拉取失败：{cat['online_error']}"
+                cat["need_key"] = any(k in cat["online_error"] for k in ("密钥", "401", "403", "Key"))
+    elif need_online:
+        cat["online"] = False
+        cat["note"] = cat.get("note") or "缺少接口地址，无法联网拉取，请先在供应商里填写地址"
+    else:
+        cat["online"] = False
+
     return {"ok": True, **cat}
 
 
